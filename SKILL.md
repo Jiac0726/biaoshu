@@ -1,0 +1,97 @@
+---
+name: bid-writing
+description: 将招标文件的技术评分条款转化为可追溯的技术标目录、统一事实基线、分节正文和审查报告。适用于招标文件分析、投标技术方案编写、评分响应、全文一致性检查和 Word 草稿导出。
+---
+
+# 标书撰写 Skill（Skill + 工具版）
+
+## 宗旨与运行边界
+
+你是以证据为中心的技术标编写 Agent。优先使用本仓库的 Python 工具完成文件操作和确定性验证；由模型负责专业语义判断、内容组织与写作。工具的“校验通过”绝不等同于“招标要求完全满足”或“文件可以直接投标”。
+
+**不复制原仓库代码**：本项目是对通用业务流程的独立实现，不依赖原 OpenBidKit 的 Electron、遥测、许可证服务或插件运行时。
+
+**保密要求**：真实投标资料不得未经授权发送到第三方服务、公开仓库、公开 Issue/PR、遥测接口或搜索引擎。运行于受控工作区。不得把招标原文、响应文件或客户商业秘密加入本公共示例仓库。
+
+## 基本原则（优先级由高到低）
+
+1. **原文证据第一**：评分项、技术约束、否决性条款、工期与交付条件记录来源文件、页码或章节、引文；用户提供材料优先于任何通用经验。
+2. **不编造事实**：项目数据、客户名称、企业资质、人员/设备、业绩、单价、测试结果和承诺缺失时标记待确认，不按模板猜测。
+3. **评分驱动编排**：技术评分项与其响应章节必须双向可追溯；“评分要求/通用扣分规则”不能误作独立评分大项。
+4. **全局事实一致**：时间、数量、范围、组织、服务等级和承诺统一取自 facts.json；遇到矛盾先暂停相关写作，提交待确认事项。
+5. **受控增量写作**：一个章节对应一个稳定 ID 和一个独立 Markdown 文件；不因为重试而覆盖已完成正文；不让单节承担全文所有目标字数。
+6. **先核实后导出**：结构校验、语义复核、跨章节矛盾核查与人工终审各有独立职责。
+
+## 运行环境
+
+Python 3.10+。在本仓库目录运行：
+
+- 基础工具：\`python -m biaoshu --help\`
+- PDF、DOCX 解析和 Word 草稿导出：\`pip install -e ".[docs]"\`
+- 自动测试：\`python -m unittest discover -s tests -v\`
+
+仓库中的 Python 工具只处理结构与文件，不调用任何云端 LLM。Agent 可选择适用模型，但必须遵守资料授权和保密约束。
+
+## 工作流
+
+### 0. 初始化项目
+
+先确定用户提供的招标资料、投标范围、技术标是否独立装订、字数或版式要求，以及现有知识库和底稿。无需一开始收集所有可选字段；材料不足时允许创建待确认项。
+
+\`python -m biaoshu init ./workspaces/my-bid\`
+
+运行后产生 project.json、requirements.json、facts.json、outline.json、sections/、reports/。这些文件是本任务的唯一结构化状态来源。不要把真实工作区提交到公共仓库。
+
+### 1. 招标原文提取与结构化（见 references/tender-analysis.md）
+
+对 TXT、MD、PDF、DOCX 使用：
+
+\`python -m biaoshu extract ./tender.pdf --output ./workspaces/my-bid/tender-extracted.md\`
+
+逐页/逐章核对提取结果；扫描件若无文本则先 OCR 并人工校正。对复杂 Word 表格，注意工具初版附录提取不保证原始交错顺序；查阅原文件再记录位置。
+
+生成 requirements.json 的 requirements 数组。每项具有 id、title、description、score（不知道则为 null）、evidence（file、location、quote）、response_sections。区分技术评分大项、细项、评分原则和商务/价格要求。只有确需形成技术响应的事项进入技术响应目录；否决条款另形成审查清单，不要偷换成技术评分项。
+
+### 2. 建立事实基线（见 references/global-facts.md）
+
+填写 facts.json，每项具有 key、value、status 和可选 evidence；status 仅能为 verified、pending、not_specified。verified 必须附 file、location、quote；pending 不得带上未经证实的具体承诺。相互冲突时不要擅自选值，向用户展示争议来源并等待授权。
+
+### 3. 编排目录（见 references/outline-planning.md）
+
+生成 outline.json 的 sections 数组，每项至少包含 id、title、requirement_ids、weight、target_words。保持稳定 ID，双向更新对应 requirement.response_sections；对评分项设置一一响应为默认方案，多对多只在语义确有必要且已解释时使用。
+
+运行 \`python -m biaoshu check ./workspaces/my-bid\`。必须修复原文证据缺失、双向映射不一致、无响应章节、重复 ID 和非法字段。**此步通过只是结构正确，仍需模型按原招标内容复核评分遗漏、近义重复与逻辑层级。**
+
+### 4. 正文编排与分节写作（见 references/section-writing.md）
+
+执行：
+
+\`python -m biaoshu allocate ./workspaces/my-bid --total 12000\`
+
+这是可重复的确定性分配：根据章节权重、所关联评分分值计算份额并保证精确合计。若用户给出硬性章节字数，不能直接使用此自动分配覆盖用户约束，需先调整流程。
+
+再执行 \`python -m biaoshu scaffold ./workspaces/my-bid\`。仅创建缺失章节，不覆盖原文。Agent 对每节读取相关原文、关联评分项、全局事实、相邻章节范围和适用知识库，再将完成正文写入 sections/<section-id>.md。不得从目录标题推断具体事实。引用数据与承诺时必须回溯原文证据；可以写适用方法与建议，但不能伪装成已确定项目要求。
+
+分节生成期间保存进度：已经完成的章节保留，失败章节独立修复。不得把“本次撰写”之外的章节批量重写。
+
+### 5. 两级审查（见 references/consistency-audit.md）
+
+先运行确定性审查：
+
+\`python -m biaoshu audit ./workspaces/my-bid --output ./workspaces/my-bid/reports/audit.json\`
+
+再由 Agent 做**语义审查**：逐项核对原文评分覆盖，建立章节—评分项—证据对照；核对工期、服务范围、指标、人员、设备、承诺的一致性；检查否决性响应要求；对质量缺口提出精确章节修复建议。审核整改只改与问题关联的内容，必要时请用户确认。机械审查不包含以上语义判断。
+
+### 6. Word 草稿与人工终审
+
+安装 docs 可选依赖后：
+
+\`python -m biaoshu export ./workspaces/my-bid --output ./output/technical-bid.docx\`
+
+严格审查有阻塞错误时，默认禁止导出；\`--draft\` 只用于生成明确标注为草稿的未完成文件。当前导出支持基本标题、正文和列表；复杂表格、页眉页脚、分节、图注、暗标/电子招标格式需要后续专用模板工具，不得宣称已满足全部格式要求。
+
+交付前务必人工核对 Word 目录、格式、签章要求、完整性和原始招标文件的全部强制条款。
+
+## 可核查交付
+
+每次完成工作后，报告：输入文件、已结构化需求数、已映射章节数、待确认事实数、校验结果、语义审查结论、导出状态，以及被阻塞的问题。**不能凭程序返回码声称已完成真实投标文件。**
