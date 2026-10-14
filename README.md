@@ -26,6 +26,7 @@ python -m pip install -e ".[docs]"
 
 # 从招标文件提取文本；再由 Agent 按 SKILL.md 核实和填充 JSON
 python -m biaoshu extract ./tender.pdf --output ./workspaces/my-bid/tender-extracted.md
+# 同时生成 tender-extracted.index.json：SHA-256、原文位置、文本块及警告
 
 # 编辑四个 JSON 后进行结构校验
 python -m biaoshu check ./workspaces/my-bid
@@ -70,9 +71,9 @@ python -m unittest discover -s tests -v
 
 ## 已实现与限制
 
-已实现：TXT/MD 读取、PDF/DOCX 可选读取、评分要求与章节双向映射、证据字段机械检查、事实状态检查、权重与评分分配字数、章节脚手架、基础 Markdown 到 DOCX、CLI、单元测试与 GitHub Actions。
+已实现：TXT/MD 行定位、PDF 页定位、DOCX 段落与表格行顺序定位、SHA-256 证据索引、评分要求与章节双向映射、证据字段机械检查、事实状态检查、权重与评分分配字数、章节脚手架、基础 Markdown 到 DOCX、CLI、单元测试与 GitHub Actions。
 
-尚未实现：自动 LLM 写作执行器、PDF OCR、高保真 DOCX 还原、复杂表格与图片处理、自动生成完整专业标书、标准与法规自动核对。机械审查不等于语义审查或合规审查。
+尚未实现：证据引文自动对照索引校验、自动 LLM 写作执行器、PDF OCR、高保真 DOCX 还原、复杂表格与图片处理、自动生成完整专业标书、标准与法规自动核对。机械审查不等于语义审查或合规审查。
 
 **资料隐私**：本仓库为公开仓库。不要提交真实投标文件、项目报价、密钥、企业商业秘密或客户信息；工作区建议保留在本地。真实业务启用云端模型前先确认用户授权和保密要求。
 

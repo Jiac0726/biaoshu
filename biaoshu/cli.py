@@ -7,38 +7,12 @@ import sys
 from pathlib import Path
 
 from .core import allocate, initialize, inspect, load_project, scaffold, write_json
+from .extraction import extract_document
 
 
 def extract_source(source: Path) -> str:
-    suffix = source.suffix.lower()
-    if suffix in (".txt", ".md"):
-        return source.read_text(encoding="utf-8-sig")
-    if suffix == ".pdf":
-        try:
-            from pypdf import PdfReader
-        except ImportError as exc:
-            raise RuntimeError('PDF 读取需要 pip install -e ".[docs]"') from exc
-        pages = []
-        reader = PdfReader(str(source))
-        for index, page in enumerate(reader.pages, 1):
-            text = (page.extract_text() or "").strip()
-            pages.append(f"## {source.name} / 第 {index} 页\n\n{text}\n")
-        if not any(page.extract_text() for page in reader.pages):
-            raise ValueError("PDF 无可提取文本，可能为扫描件，需先 OCR 并人工检查")
-        return "\n".join(pages)
-    if suffix == ".docx":
-        try:
-            from docx import Document
-        except ImportError as exc:
-            raise RuntimeError('DOCX 读取需要 pip install -e ".[docs]"') from exc
-        doc = Document(str(source))
-        paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
-        tables = []
-        for i, table in enumerate(doc.tables, 1):
-            rows = [" | ".join(cell.text.replace("\n", " / ") for cell in row.cells) for row in table.rows]
-            tables.append(f"\n### 表格 {i}\n" + "\n".join(rows))
-        return "\n".join(paragraphs + tables)
-    raise ValueError("当前支持 .txt、.md、.pdf、.docx")
+    """Compatibility helper; CLI also saves a machine-readable evidence index."""
+    return extract_document(source).markdown
 
 
 def export_docx(root: Path, dest: Path, draft: bool):
@@ -104,10 +78,12 @@ def main(argv=None):
             initialize(args.project_dir)
             print(f"已初始化：{args.project_dir}")
         elif args.command == "extract":
-            extracted = extract_source(args.source)
+            extracted = extract_document(args.source)
             args.output.parent.mkdir(parents=True, exist_ok=True)
-            args.output.write_text(f"# 招标原文提取\n\n来源：{args.source.name}\n\n{extracted}\n", encoding="utf-8")
-            print(f"已提取：{args.output}。请人工核对页码、表格和缺失文本。")
+            args.output.write_text("\n".join(["# 招标原文提取", "", f"来源：{args.source.name}", "", extracted.markdown]), encoding="utf-8")
+            index_path = args.output.with_suffix(".index.json")
+            write_json(index_path, extracted.index)
+            print(f"已提取：{args.output}；证据索引：{index_path}。请人工核对缺失文本和提取警告。")
         elif args.command in ("check", "audit"):
             report = inspect(args.project_dir, strict=args.command == "audit")
             if args.output:
