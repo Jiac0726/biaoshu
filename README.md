@@ -17,7 +17,7 @@
 
 Python 3.10 或以上。在项目目录执行：
 
-\`\`\`bash
+```bash
 # 基础功能无需安装第三方包
 python -m biaoshu init ./workspaces/my-bid
 
@@ -42,13 +42,13 @@ python -m biaoshu export ./workspaces/my-bid --output ./output/technical-bid.doc
 
 # 测试
 python -m unittest discover -s tests -v
-\`\`\`
+```
 
 ## 项目数据格式
 
 工具初始化 project.json、requirements.json、facts.json、outline.json、sections/ 和 reports/。
 
-\`\`\`json
+```json
 {
   "requirements": [
     {
@@ -64,7 +64,7 @@ python -m unittest discover -s tests -v
     }
   ]
 }
-\`\`\`
+```
 
 上面仅是格式示意，不是任何真实招标要求；若缺少真实证据应记录缺失，不能复制示例内容伪造来源。其他 JSON 结构、操作规程见 SKILL.md 和 references/。
 

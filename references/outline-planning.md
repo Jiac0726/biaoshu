@@ -13,7 +13,7 @@
 
 outline.json 用扁平叶子模型管理可独立撰写章节，目录显示层级可以在后续版本单独扩展。
 
-\`\`\`json
+```json
 {
   "sections": [
     {
@@ -25,6 +25,6 @@ outline.json 用扁平叶子模型管理可独立撰写章节，目录显示层�
     }
   ]
 }
-\`\`\`
+```
 
 requirements.json 的相应项必须设置 response_sections=["S1"]。对应关系是双向一致性规则。当前 Python 工具只判断映射完整和 ID 合法，不会判断 R1 与 S1 的专业含义是否真的一致；Agent 需逐项对照原文复核。

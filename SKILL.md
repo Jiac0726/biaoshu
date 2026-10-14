@@ -26,9 +26,9 @@ description: 将招标文件的技术评分条款转化为可追溯的技术标�
 
 Python 3.10+。在本仓库目录运行：
 
-- 基础工具：\`python -m biaoshu --help\`
-- PDF、DOCX 解析和 Word 草稿导出：\`pip install -e ".[docs]"\`
-- 自动测试：\`python -m unittest discover -s tests -v\`
+- 基础工具：`python -m biaoshu --help`
+- PDF、DOCX 解析和 Word 草稿导出：`pip install -e ".[docs]"`
+- 自动测试：`python -m unittest discover -s tests -v`
 
 仓库中的 Python 工具只处理结构与文件，不调用任何云端 LLM。Agent 可选择适用模型，但必须遵守资料授权和保密约束。
 
@@ -38,7 +38,7 @@ Python 3.10+。在本仓库目录运行：
 
 先确定用户提供的招标资料、投标范围、技术标是否独立装订、字数或版式要求，以及现有知识库和底稿。无需一开始收集所有可选字段；材料不足时允许创建待确认项。
 
-\`python -m biaoshu init ./workspaces/my-bid\`
+`python -m biaoshu init ./workspaces/my-bid`
 
 运行后产生 project.json、requirements.json、facts.json、outline.json、sections/、reports/。这些文件是本任务的唯一结构化状态来源。不要把真实工作区提交到公共仓库。
 
@@ -46,7 +46,7 @@ Python 3.10+。在本仓库目录运行：
 
 对 TXT、MD、PDF、DOCX 使用：
 
-\`python -m biaoshu extract ./tender.pdf --output ./workspaces/my-bid/tender-extracted.md\`
+`python -m biaoshu extract ./tender.pdf --output ./workspaces/my-bid/tender-extracted.md`
 
 逐页/逐章核对提取结果；扫描件若无文本则先 OCR 并人工校正。对复杂 Word 表格，注意工具初版附录提取不保证原始交错顺序；查阅原文件再记录位置。
 
@@ -60,17 +60,17 @@ Python 3.10+。在本仓库目录运行：
 
 生成 outline.json 的 sections 数组，每项至少包含 id、title、requirement_ids、weight、target_words。保持稳定 ID，双向更新对应 requirement.response_sections；对评分项设置一一响应为默认方案，多对多只在语义确有必要且已解释时使用。
 
-运行 \`python -m biaoshu check ./workspaces/my-bid\`。必须修复原文证据缺失、双向映射不一致、无响应章节、重复 ID 和非法字段。**此步通过只是结构正确，仍需模型按原招标内容复核评分遗漏、近义重复与逻辑层级。**
+运行 `python -m biaoshu check ./workspaces/my-bid`。必须修复原文证据缺失、双向映射不一致、无响应章节、重复 ID 和非法字段。**此步通过只是结构正确，仍需模型按原招标内容复核评分遗漏、近义重复与逻辑层级。**
 
 ### 4. 正文编排与分节写作（见 references/section-writing.md）
 
 执行：
 
-\`python -m biaoshu allocate ./workspaces/my-bid --total 12000\`
+`python -m biaoshu allocate ./workspaces/my-bid --total 12000`
 
 这是可重复的确定性分配：根据章节权重、所关联评分分值计算份额并保证精确合计。若用户给出硬性章节字数，不能直接使用此自动分配覆盖用户约束，需先调整流程。
 
-再执行 \`python -m biaoshu scaffold ./workspaces/my-bid\`。仅创建缺失章节，不覆盖原文。Agent 对每节读取相关原文、关联评分项、全局事实、相邻章节范围和适用知识库，再将完成正文写入 sections/<section-id>.md。不得从目录标题推断具体事实。引用数据与承诺时必须回溯原文证据；可以写适用方法与建议，但不能伪装成已确定项目要求。
+再执行 `python -m biaoshu scaffold ./workspaces/my-bid`。仅创建缺失章节，不覆盖原文。Agent 对每节读取相关原文、关联评分项、全局事实、相邻章节范围和适用知识库，再将完成正文写入 sections/<section-id>.md。不得从目录标题推断具体事实。引用数据与承诺时必须回溯原文证据；可以写适用方法与建议，但不能伪装成已确定项目要求。
 
 分节生成期间保存进度：已经完成的章节保留，失败章节独立修复。不得把“本次撰写”之外的章节批量重写。
 
@@ -78,7 +78,7 @@ Python 3.10+。在本仓库目录运行：
 
 先运行确定性审查：
 
-\`python -m biaoshu audit ./workspaces/my-bid --output ./workspaces/my-bid/reports/audit.json\`
+`python -m biaoshu audit ./workspaces/my-bid --output ./workspaces/my-bid/reports/audit.json`
 
 再由 Agent 做**语义审查**：逐项核对原文评分覆盖，建立章节—评分项—证据对照；核对工期、服务范围、指标、人员、设备、承诺的一致性；检查否决性响应要求；对质量缺口提出精确章节修复建议。审核整改只改与问题关联的内容，必要时请用户确认。机械审查不包含以上语义判断。
 
@@ -86,9 +86,9 @@ Python 3.10+。在本仓库目录运行：
 
 安装 docs 可选依赖后：
 
-\`python -m biaoshu export ./workspaces/my-bid --output ./output/technical-bid.docx\`
+`python -m biaoshu export ./workspaces/my-bid --output ./output/technical-bid.docx`
 
-严格审查有阻塞错误时，默认禁止导出；\`--draft\` 只用于生成明确标注为草稿的未完成文件。当前导出支持基本标题、正文和列表；复杂表格、页眉页脚、分节、图注、暗标/电子招标格式需要后续专用模板工具，不得宣称已满足全部格式要求。
+严格审查有阻塞错误时，默认禁止导出；`--draft` 只用于生成明确标注为草稿的未完成文件。当前导出支持基本标题、正文和列表；复杂表格、页眉页脚、分节、图注、暗标/电子招标格式需要后续专用模板工具，不得宣称已满足全部格式要求。
 
 交付前务必人工核对 Word 目录、格式、签章要求、完整性和原始招标文件的全部强制条款。
 
