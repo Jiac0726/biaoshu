@@ -171,3 +171,18 @@ python -m biaoshu audit ./workspaces/my-bid --index ./workspaces/my-bid/tender-e
 章节只在缺失或恰为 scaffold 自动生成的 TODO 占位时写入；已经存在的人工正文及已有 AI 草稿一律跳过，重复执行可续写未完成章节。模型调用失败时记录本地失败检查点，不保存提示词或密钥。输出的 AI 草稿带有待审查提示；严格 audit 与非草稿 export 在章节未批准或批准后内容变化时阻断。审批确认是操作者声明，而非签名或完整语义核验。不得让模型代替人执行批准。
 
 默认本地接口 http://127.0.0.1:11434/v1；远程仅在资料外发已获合法授权并显式加 --allow-remote 时启用。AI 只检验引用过的原文文本存在且模型声明覆盖本节要求，并不保证语义完全覆盖、事实绝不遗漏、标书可正式投标。真实模型兼容性和长文质量有待专项验收。
+
+
+## 跨章节承诺一致性审查（本轮新增）
+
+在章节完成后执行本地机械核验，重点定位各章节对明确的工期、服务期限、质保期和响应时限的互相矛盾：
+
+```bash
+python -m biaoshu consistency-audit ./workspaces/my-bid --output ./workspaces/my-bid/reports/consistency.json
+python -m biaoshu check ./workspaces/my-bid
+python -m biaoshu audit ./workspaces/my-bid --index ./workspaces/my-bid/tender-extracted.index.json --source-dir ./sources
+```
+
+报告包含逐条冲突的章节 ID、行号、原句、数值与单位，也会将相同字段与 facts.json 中已核实的唯一基线值核对。未确认事实出现确定性承诺时标记 warning。普通 check 只警告，严格 audit 和正式 export 会阻断同单位下明确矛盾；草稿导出仍须明确标识未校验状态。扫描只读取本地章节，不请求远程服务也不会自动改写正文。
+
+本工具仅对这四种带明确单位的等式型承诺做保守文字核对，不比较不同单位或专业条件、上下限，不保证发现所有项目事实与评分项漏写，不替代独立语义审稿、合规审核与人工终审。
