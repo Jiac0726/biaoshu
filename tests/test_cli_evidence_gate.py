@@ -20,7 +20,7 @@ class CliEvidenceIntegrationTests(unittest.TestCase):
         self.project = self.root / "project"
         initialize(self.project)
         self.source = self.sources / "tender.txt"
-        self.source.write_text("技术评分：实施组织\\n交付时间：30日\\n", encoding="utf-8")
+        self.source.write_text("技术评分：实施组织\n交付时间：30日\n", encoding="utf-8")
         self.extracted = self.root / "tender-extracted.md"
         self.assertEqual(self.run_cli("extract", str(self.source), "--output", str(self.extracted)), 0)
         self.index = self.extracted.with_suffix(".index.json")
@@ -38,7 +38,7 @@ class CliEvidenceIntegrationTests(unittest.TestCase):
              "weight": 1.0, "target_words": 0}
         ]})
         (self.project / "sections" / "S1.md").write_text(
-            "# 实施组织\\n根据招标要求设置实施组织和项目管理机制。\\n", encoding="utf-8"
+            "# 实施组织\n根据招标要求设置实施组织和项目管理机制。\n", encoding="utf-8"
         )
 
     @staticmethod
@@ -72,7 +72,7 @@ class CliEvidenceIntegrationTests(unittest.TestCase):
                                       "--index", str(self.index)), 1)
 
     def test_changed_source_fails_audit_and_prevents_official_export(self):
-        self.source.write_text("技术评分：变更内容\\n交付时间：90日\\n", encoding="utf-8")
+        self.source.write_text("技术评分：变更内容\n交付时间：90日\n", encoding="utf-8")
         out = self.root / "official.docx"
         self.assertEqual(self.run_cli("audit", str(self.project), *self.evidence_args()), 1)
         self.assertNotEqual(self.run_cli("export", str(self.project), *self.evidence_args(),
@@ -97,7 +97,7 @@ class CliEvidenceIntegrationTests(unittest.TestCase):
                                       "--output", str(out)), 0)
         self.assertTrue(out.is_file())
         from docx import Document
-        self.assertIn("实施组织", "\\n".join(p.text for p in Document(str(out)).paragraphs))
+        self.assertIn("实施组织", "\n".join(p.text for p in Document(str(out)).paragraphs))
 
     def test_draft_works_without_evidence_and_is_visibly_marked(self):
         try:
