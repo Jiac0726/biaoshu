@@ -14,13 +14,24 @@ from .review_transaction import atomic_create
 _PROTECTED_NAMES = {
     "project.json", "requirements.json", "facts.json", "outline.json",
     "response-trace.json", "outline-lock.json",
+    "review-import-transaction.json", ".review-import.lock",
 }
+
+
+def _is_internal_state_path(path: Path) -> bool:
+    name = path.name.lower()
+    if name in _PROTECTED_NAMES or name.endswith((".transaction.json", ".write.lock", ".before.json")):
+        return True
+    # Section-writing checkpoints are approval state, even when the target
+    # does not exist yet. A speculative suggestions report must never create
+    # an apparently valid (but actually false) checkpoint.
+    return path.parent.name.lower() == "section-writing" and name.endswith(".json")
 
 
 def validate_new_report_target(path: Path) -> None:
     """Early warning before invoking expensive/remote analysis; not a lock."""
     path = Path(path)
-    if path.name.lower() in _PROTECTED_NAMES:
+    if _is_internal_state_path(path):
         raise ValueError("输出文件名与正式项目或审核数据冲突，不能作为建议报告目标")
     if path.exists() or path.is_symlink():
         raise ValueError("报告目标已经存在；禁止覆盖现有报告、原招标文件或项目正式数据")
