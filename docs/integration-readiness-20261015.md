@@ -64,3 +64,11 @@
 - **当前 CI**：原 PR 通过，但新加固提交需以本 PR 最新 GitHub Actions 为准。
 - **批准记录**：未取得独立 Approved 记录。
 - **合并状态**：未执行任何 main merge；仍存在发布阻断风险。
+
+## 后续加固：review-import 导入事务与中断恢复
+
+原来 review-import 连续写 requirements.json 和 outline.json，中间可能崩溃而留下不配对文件；同时缺少同工作区的排他导入。现在导入时创建 `reports/.review-import.lock`，备份原件并写 `reports/review-import-transaction.json`，用同目录临时文件逐个 os.replace。**这并非跨两个文件的硬件原子事务**：若进程恰在两次替换之间结束，事务日志将使 inspect/check/audit/export 阻断。
+
+可由操作员使用 `review-recover PROJECT --confirm` 恢复两份更新前文件。恢复会检查两个当前文件是否属于本事务记录的 before/after 版本，且备份哈希符合记录；发现外部未知编辑就拒绝覆盖，保留证据等待手工调查。旧日志不自动删除。导入保留 requirements.json 与 outline.json 的既有自定义顶层元数据。
+
+专项测试已注入第二文件替换失败、恢复前阻断、恢复后内容一致、未知编辑拒绝回退及独占锁占用。**剩余限制**：锁仅协调本程序的应用者；外部软件不遵守该锁。文件系统断电时 journal 的持久性及跨机锁可靠性尚未专项验证，应使用真实文件系统与专业备份方案，勿将本方案描述为无条件事务 ACID。
