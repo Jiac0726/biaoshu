@@ -12,6 +12,7 @@ from .extraction import extract_document
 from .score_candidates import discover_score_candidates
 from .ai_tender_analysis import analyze_tender
 from .review_import import review_template, reviewed_import
+from .review_transaction import recover as recover_review
 from .outline_tree import (outline_template, outline_plan, lock_outline,
                            walk_outline, validate_outline_state)
 from .section_writer import write_sections, approve_section
@@ -184,6 +185,9 @@ def main(argv=None):
     semantic.add_argument("--timeout", type=float, default=90)
     semantic.add_argument("--output", type=Path, required=True,
                           help="只生成独立待复核建议 JSON，不修改项目或审批台账")
+    recovery = sub.add_parser("review-recover", help="中断的审核导入按事务备份恢复，绝不合并未知外部改动")
+    recovery.add_argument("project_dir", type=Path)
+    recovery.add_argument("--confirm", action="store_true")
     args = parser.parse_args(argv)
     try:
         if args.command == "init":
@@ -268,6 +272,10 @@ def main(argv=None):
             template = review_template(args.suggestions)
             write_json(args.output, template)
             print(f"审核清单：{args.output}，共 {len(template['decisions'])} 项；请逐项填 accept/reject。")
+        elif args.command == "review-recover":
+            result = recover_review(args.project_dir, confirm=args.confirm)
+            print(f"已恢复审核导入事务：{', '.join(result['restored_files'])}；"
+                  f"保留原始备份 {result['backup']}")
         elif args.command == "review-import":
             plan = reviewed_import(args.project_dir, args.suggestions, args.review,
                                    args.index, args.source_dir, apply=args.apply)
