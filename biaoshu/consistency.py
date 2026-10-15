@@ -28,14 +28,14 @@ _LABEL_PATTERN = "|".join(re.escape(label) for labels in _LABELS.values() for la
 _STATEMENT = re.compile(
     rf"(?P<label>{_LABEL_PATTERN})\s*(?:[:：]|为|是|确定为|计划为|拟定为)\s*"
     r"(?P<value>\d{1,5}(?:\.\d{1,2})?)\s*"
-    r"(?P<unit>小时|个月|天|日|月|年)(?![年月天日小时])"
+    r"(?P<unit>小时|分钟|秒|个月|天|日|月|年)(?![年月天日小时分钟秒])"
 )
 _FACT_VALUE = re.compile(
     r"(?<![\d.])(?P<value>\d{1,5}(?:\.\d{1,2})?)\s*"
-    r"(?P<unit>小时|个月|天|日|月|年)(?![年月天日小时])"
+    r"(?P<unit>小时|分钟|秒|个月|天|日|月|年)(?![年月天日小时分钟秒])"
 )
 _UNIT_NAMES = {"天": "日", "日": "日", "个月": "月", "月": "月",
-               "年": "年", "小时": "小时"}
+               "年": "年", "小时": "小时", "分钟": "分钟", "秒": "秒"}
 # Skip explicitly hypothetical, example or negated clauses; these are not
 # deterministic commitments and must be interpreted by a human reviewer.
 _NON_ASSERTED = re.compile(r"若|如果|假如|假设|假定|例如|举例|示例|样例|并非|不是|不代表")
@@ -113,20 +113,24 @@ def analyze_consistency(root: Path, state: dict | None = None) -> dict:
                 continue
             if in_code or not trimmed or trimmed.startswith((">", "#", "|")):
                 continue
-            for match in _STATEMENT.finditer(line):
+            # Inline Markdown emphasis is not a change of contractual meaning.
+            visible = re.sub(r"\\*\\*|__", "", line)
+            # Inline quoted history/examples aren't the current bidder's promise.
+            visible = re.sub(r"“[^”]*”|「[^」]*」|‘[^’]*’", "", visible)
+            for match in _STATEMENT.finditer(visible):
                 # "设备供货工期" must not be mistaken for the project duration.
-                if match.start() > 0 and "\u4e00" <= line[match.start() - 1] <= "\u9fff":
+                if match.start() > 0 and "\u4e00" <= visible[match.start() - 1] <= "\u9fff":
                     continue
                 # Bound values, approximations and calendar dates are not
                 # deterministic equalities, so must not block final export.
-                rest = line[match.end():]
+                rest = visible[match.end():]
                 if re.match(r"\s*(?:内|以内|以上|以下|左右|起|至|到|前|后|不等|\d)", rest):
                     continue
                 if match.group("unit") == "年" and Decimal(match.group("value")) >= 100:
                     continue
                 # Look only within the clause containing this statement.
                 # Conditional examples must not become hard export blockers.
-                prefix = re.split(r"[。；;！!？?]", line[:match.start()])[-1]
+                prefix = re.split(r"[。；;！!？?]", visible[:match.start()])[-1]
                 if _NON_ASSERTED.search(prefix):
                     continue
                 cat = _category(match.group("label"))
