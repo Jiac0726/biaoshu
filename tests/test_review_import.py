@@ -174,6 +174,108 @@ class ReviewedImportTests(unittest.TestCase):
         self.assertEqual((self.project / "outline.json").read_bytes(), previous_outline)
         self.assertEqual(len(read_json(self.project / "requirements.json")["requirements"]), 1)
 
+    def test_import_preserves_custom_project_metadata(self):
+        reqs = read_json(self.project / "requirements.json")
+        outline = read_json(self.project / "outline.json")
+        reqs["project_reference"] = "demo-safe-metadata"
+        outline["layout_notes"] = {"reviewed": True}
+        write_json(self.project / "requirements.json", reqs)
+        write_json(self.project / "outline.json", outline)
+        self.decide(("accept", "accept"))
+        self.run_import(apply=True)
+        self.assertEqual(read_json(self.project / "requirements.json")["project_reference"],
+                         "demo-safe-metadata")
+        self.assertEqual(read_json(self.project / "outline.json")["layout_notes"],
+                         {"reviewed": True})
+
+    def test_concurrent_import_lock_prevents_any_mutation(self):
+        from biaoshu.review_transaction import LOCK
+        self.decide()
+        lock = self.project / "reports" / LOCK
+        lock.mkdir()
+        before = (self.project / "requirements.json").read_bytes()
+        with self.assertRaisesRegex(ValueError, "独占锁"):
+            self.run_import(apply=True)
+        self.assertEqual((self.project / "requirements.json").read_bytes(), before)
+        self.assertFalse((self.project / "reports" / "review-import-transaction.json").exists())
+
+    def test_interrupted_two_file_write_blocks_audit_until_safe_recovery(self):
+        from unittest.mock import patch
+        from biaoshu import review_transaction as txn
+        self.decide(("accept", "accept"))
+        req_path = self.project / "requirements.json"
+        out_path = self.project / "outline.json"
+        original_req, original_out = req_path.read_bytes(), out_path.read_bytes()
+        saved = txn._atomic_bytes
+        writes = []
+        def fail_second(dest, data):
+            writes.append(dest.name)
+            if dest.name == "outline.json":
+                raise OSError("synthetic interruption")
+            return saved(dest, data)
+        with patch.object(txn, "_atomic_bytes", side_effect=fail_second):
+            with self.assertRaisesRegex(OSError, "synthetic interruption"):
+                self.run_import(apply=True)
+        self.assertEqual(writes, ["requirements.json", "outline.json"])
+        self.assertNotEqual(req_path.read_bytes(), original_req)
+        self.assertEqual(out_path.read_bytes(), original_out)
+        self.assertTrue(txn.journal_path(self.project).exists())
+        check = inspect(self.project, strict=True)
+        self.assertFalse(check["ok"])
+        self.assertTrue(any("review-recover" in msg for msg in check["errors"]))
+        with self.assertRaisesRegex(ValueError, "未完成的事务"):
+            self.run_import(apply=True)
+        with self.assertRaisesRegex(ValueError, "confirm"):
+            txn.recover(self.project)
+        report = txn.recover(self.project, confirm=True)
+        self.assertEqual(report["status"], "restored")
+        self.assertEqual(req_path.read_bytes(), original_req)
+        self.assertEqual(out_path.read_bytes(), original_out)
+        self.assertFalse(txn.journal_path(self.project).exists())
+        self.assertTrue(inspect(self.project)["ok"])
+        self.assertTrue((Path(report["backup"]) / "requirements.before.json").is_file())
+        self.assertTrue((Path(report["backup"]) / "outline.before.json").is_file())
+
+    def test_recover_refuses_unknown_manual_edits_after_interruption(self):
+        from unittest.mock import patch
+        from biaoshu import review_transaction as txn
+        self.decide()
+        saved = txn._atomic_bytes
+        def break_second(dest, data):
+            if dest.name == "outline.json":
+                raise OSError("synthetic crash")
+            return saved(dest, data)
+        with patch.object(txn, "_atomic_bytes", side_effect=break_second):
+            with self.assertRaises(OSError):
+                self.run_import(apply=True)
+        req = self.project / "requirements.json"
+        req.write_text('{"requirements":[],"manual_revision":"must not be lost"}', encoding="utf-8")
+        before = req.read_bytes()
+        with self.assertRaisesRegex(ValueError, "外部修改"):
+            txn.recover(self.project, confirm=True)
+        self.assertEqual(req.read_bytes(), before)
+        self.assertTrue(txn.journal_path(self.project).exists())
+
+    def test_recovery_cli_requires_confirmation(self):
+        from unittest.mock import patch
+        from biaoshu.cli import main
+        from biaoshu import review_transaction as txn
+        import contextlib, io
+        self.decide()
+        normal_write = txn._atomic_bytes
+        def simulate(dest, raw):
+            if dest.name == "outline.json":
+                raise OSError("synthetic simulated IO failure")
+            return normal_write(dest, raw)
+        with patch.object(txn, "_atomic_bytes", side_effect=simulate):
+            with self.assertRaises(OSError):
+                self.run_import(apply=True)
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(main(["review-recover", str(self.project)]), 2)
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(main(["review-recover", str(self.project), "--confirm"]), 0)
+        self.assertFalse(txn.journal_path(self.project).exists())
+
     def test_second_import_idempotent(self):
         self.decide()
         self.run_import(apply=True)
