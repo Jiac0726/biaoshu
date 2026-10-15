@@ -165,7 +165,7 @@ def write_section(root: Path, section_id: str, index_paths: list[Path], source_d
     lock = folder / (section_id + ".write.lock")
     try:
         with lock.open("x", encoding="utf-8") as stream:
-            stream.write("in_progress\n")
+            stream.write(json.dumps({"pid": os.getpid(), "status": "writing"}, ensure_ascii=False) + "\n")
     except FileExistsError as exc:
         raise ValueError(f"章节 {section_id} 已有写入锁，可能正在执行") from exc
     try:
@@ -248,7 +248,7 @@ def write_section(root: Path, section_id: str, index_paths: list[Path], source_d
         lock.unlink(missing_ok=True)
 
 
-def approve_section(root: Path, section_id: str, *, acknowledgement: str) -> dict:
+def _approve_section_locked(root: Path, section_id: str, *, acknowledgement: str) -> dict:
     """An explicit reviewer assertion, bound to the reviewed section bytes."""
     root = Path(root)
     dest = section_path(root, section_id)
@@ -261,6 +261,7 @@ def approve_section(root: Path, section_id: str, *, acknowledgement: str) -> dic
         raise ValueError("没有可审批的 AI 章节或检查点")
     meta = json.loads(checkpoint.read_text(encoding="utf-8"))
     current = dest.read_text(encoding="utf-8")
+    initial_content = current
     if meta.get("section_id") != section_id or meta.get("status") not in {"pending_review", "approved"}:
         raise ValueError("当前检查点不能审批")
     if meta["status"] == "pending_review" and _digest(current.encode("utf-8")) != meta.get("body_sha256"):
@@ -295,14 +296,106 @@ def approve_section(root: Path, section_id: str, *, acknowledgement: str) -> dic
         current = current.replace(BANNER + "\n\n", "", 1)
     if len(current.strip()) < 50 or "TODO" in current.upper() or "待撰写" in current:
         raise ValueError("正文仍未完成")
-    if current != dest.read_text(encoding="utf-8"):
-        dest.write_text(current, encoding="utf-8")
+    # Treat the section and approval sidecar as one recoverable logical change:
+    # the durable journal is created before either destination is replaced.
+    # An interrupted update must be rolled back explicitly to the still-pending
+    # reviewed draft; never silently approve a bannerless partial write.
+    if meta["status"] == "approved":
+        return {"section_id": section_id, "status": "approved"}
+    if initial_content != dest.read_text(encoding="utf-8"):
+        raise ValueError("批准前章节被并发修改，拒绝写入")
+    approved_bytes = current.encode("utf-8")
     meta["status"] = "approved"
     meta["context_sha256"] = context_sha
-    meta["body_sha256"] = _digest(dest.read_bytes())
+    meta["body_sha256"] = _digest(approved_bytes)
     meta["note"] = "操作者已声明审查此章节；不等于招标合规终审"
-    write_json(checkpoint, meta)
+    checkpoint_bytes = (json.dumps(meta, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+    journal = stage(root, section_id, approved_bytes, checkpoint_bytes, status="approving")
+    from .review_transaction import _atomic_bytes
+    _atomic_bytes(dest, approved_bytes)
+    _atomic_bytes(checkpoint, checkpoint_bytes)
+    if dest.read_bytes() != approved_bytes or checkpoint.read_bytes() != checkpoint_bytes:
+        raise OSError("审批事务写入未完整验证，需运行 section-recover 后重试审批")
+    journal.unlink()
     return {"section_id": section_id, "status": "approved"}
+
+
+def approve_section(root: Path, section_id: str, *, acknowledgement: str) -> dict:
+    """Serialize approval with AI generation and any manual-recovery workflow."""
+    root = Path(root)
+    lock = checkpoint_path(root, section_id).with_name(section_id + ".write.lock")
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    if lock.exists():
+        raise ValueError("章节存在写入或审批锁，需确认进程结束并进行 section-recover")
+    try:
+        with lock.open("x", encoding="utf-8") as stream:
+            stream.write(json.dumps({"pid": os.getpid(), "status": "approving"}) + "\n")
+    except FileExistsError as exc:
+        raise ValueError("章节正在执行写作或审批，不能同时批准") from exc
+    try:
+        return _approve_section_locked(root, section_id, acknowledgement=acknowledgement)
+    finally:
+        lock.unlink(missing_ok=True)
+
+
+def accept_manual_section(root: Path, section_id: str, *, confirm: bool = False) -> dict:
+    """Remove only a failed-pre-draft AI marker after deliberate human takeover.
+
+    This never signs an AI draft. It is valid only if generation failed before
+    any journal/content commit and the operator supplied a finished manual body.
+    """
+    if not confirm:
+        raise ValueError("人工接管章节必须明确指定 --confirm")
+    root = Path(root)
+    dest = section_path(root, section_id)
+    checkpoint = checkpoint_path(root, section_id)
+    lock = checkpoint.with_name(section_id + ".write.lock")
+    if stage_path(root, section_id).exists() or lock.exists():
+        raise ValueError("存在章节写作事务或锁，请先执行 section-recover，禁止直接人工接管")
+    if not checkpoint.is_file() or not dest.is_file():
+        raise ValueError("没有失败检查点或人工正文可供接管")
+    meta = json.loads(checkpoint.read_text(encoding="utf-8"))
+    if (not isinstance(meta, dict) or meta.get("schema_version") != 1
+            or meta.get("section_id") != section_id or meta.get("status") != "failed"):
+        raise ValueError("只有生成失败且未提交 AI 正文的检查点才允许人工接管")
+    state = load_project(root)
+    section = next((s for s in state["outline.json"]["sections"]
+                    if s["id"] == section_id), None)
+    if section is None or not inspect(root)["ok"]:
+        raise ValueError("项目或章节结构无效，不能进行人工接管")
+    body = dest.read_text(encoding="utf-8")
+    if (len(body.strip()) < 40 or BANNER in body
+            or "TODO" in body.upper() or "待撰写" in body):
+        raise ValueError("人工接管要求已完成且不含 AI 待审标记和占位符的正文")
+    try:
+        with lock.open("x", encoding="utf-8") as stream:
+            stream.write(json.dumps({"pid": os.getpid(), "status": "manual"}) + "\n")
+    except FileExistsError as exc:
+        raise ValueError("章节正在被其他任务处理") from exc
+    try:
+        before = checkpoint.read_bytes()
+        import hashlib
+        from .review_transaction import atomic_create
+        archive = checkpoint.parent / "archive" / (
+            section_id + ".failed-" + hashlib.sha256(before).hexdigest() + ".json")
+        archive.parent.mkdir(parents=True, exist_ok=True)
+        if archive.exists():
+            if archive.read_bytes() != before:
+                raise ValueError("相同指纹的失败检查点存档被修改，禁止继续")
+        else:
+            try:
+                atomic_create(archive, before)
+            except FileExistsError:
+                if archive.read_bytes() != before:
+                    raise ValueError("并发创建的存档与失败检查点不一致")
+        if (dest.read_text(encoding="utf-8") != body
+                or checkpoint.read_bytes() != before):
+            raise ValueError("人工接管期间正文或检查点被并发修改")
+        checkpoint.unlink()
+        return {"section_id": section_id, "status": "manual_content_registered",
+                "archive": str(archive)}
+    finally:
+        lock.unlink(missing_ok=True)
 
 
 def write_sections(root: Path, section_ids: list[str] | None, indexes: list[Path],
