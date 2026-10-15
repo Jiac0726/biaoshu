@@ -17,11 +17,19 @@ _PROTECTED_NAMES = {
 }
 
 
-def write_new_report(path: Path, value: dict) -> None:
-    """Write a new local JSON report, never replacing an existing path."""
+def validate_new_report_target(path: Path) -> None:
+    """Early warning before invoking expensive/remote analysis; not a lock."""
     path = Path(path)
     if path.name.lower() in _PROTECTED_NAMES:
         raise ValueError("输出文件名与正式项目或审核数据冲突，不能作为建议报告目标")
+    if path.exists() or path.is_symlink():
+        raise ValueError("报告目标已经存在；禁止覆盖现有报告、原招标文件或项目正式数据")
+
+
+def write_new_report(path: Path, value: dict) -> None:
+    """Write a new local JSON report, never replacing an existing path."""
+    path = Path(path)
+    validate_new_report_target(path)
     # Serialize before opening or creating any output so an invalid result
     # never leaves a partial file.
     content = (json.dumps(value, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
