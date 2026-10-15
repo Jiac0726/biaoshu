@@ -282,7 +282,9 @@ def main(argv=None):
                 raise ValueError("审核清单已存在，禁止覆盖人工审核结果；请使用新的输出路径")
             template = review_template(args.suggestions)
             write_json(args.output, template)
-            print(f"审核清单：{args.output}，共 {len(template['decisions'])} 项；请逐项填 accept/reject。")
+            multi = len(template.get("ambiguous_decisions", []))
+            print(f"审核清单：{args.output}；确定性候选 {len(template['decisions'])} 项"
+                  f"，多档评分需逐项审查 {multi} 项。多档项目不得自动采用单一分值。")
         elif args.command == "review-recover":
             result = recover_review(args.project_dir, confirm=args.confirm)
             print(f"已恢复审核导入事务：{', '.join(result['restored_files'])}；"
@@ -293,6 +295,7 @@ def main(argv=None):
             if args.output:
                 write_json(args.output, plan)
             print(f"{'已登记' if args.apply else '仅预览'}：新增 {plan['statistics']['new_requirements']} 条，"
+                  f"多档待处理 {plan['statistics'].get('ambiguous_pending', 0)} 条，"
                   f"拒绝 {plan['statistics']['rejected']} 条，"
                   f"待审 {plan['statistics']['pending']} 条，"
                   f"重复 {plan['statistics']['duplicate']} 条。"
