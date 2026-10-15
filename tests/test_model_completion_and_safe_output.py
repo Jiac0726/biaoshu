@@ -85,6 +85,33 @@ class ModelCompletionAndSafeOutputTests(unittest.TestCase):
                 write_new_report(out, {"items": []})
             self.assertFalse(out.exists())
 
+    def test_transaction_journals_cannot_be_spoofed_by_ai_reports(self):
+        reserved = [
+            self.project / "reports" / "review-import-transaction.json",
+            self.project / "reports" / "section-writing" / "S1.transaction.json",
+            self.project / "reports" / "section-writing" / "S1.json",
+            self.project / "reports" / "section-writing" / "S1.write.lock",
+            self.project / "reports" / "review-backups" / "requirements.before.json",
+        ]
+        for target in reserved:
+            with self.subTest(target=str(target)), \
+                    self.assertRaisesRegex(ValueError, "正式项目"):
+                write_new_report(target, {"status": "suggestions_only"})
+            self.assertFalse(target.exists())
+
+    def test_cli_blocks_transaction_output_before_model(self):
+        target = self.project / "reports" / "review-import-transaction.json"
+        with patch("biaoshu.cli.analyze_tender", return_value={
+                "candidates": [], "statistics": {"selected_blocks": 1}}) as model:
+            code = self.cli([
+                "analyze-ai", "--index", str(self.root / "fake.index.json"),
+                "--source-dir", str(self.sources), "--model", "local-fake",
+                "--output", str(target),
+            ])
+            model.assert_not_called()
+        self.assertNotEqual(code, 0)
+        self.assertFalse(target.exists())
+
     def test_existing_original_tender_and_index_protected(self):
         before = self.source.read_bytes()
         with self.assertRaisesRegex(ValueError, "禁止覆盖"):
