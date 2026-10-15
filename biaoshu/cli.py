@@ -15,6 +15,7 @@ from .review_import import review_template, reviewed_import
 from .outline_tree import (outline_template, outline_plan, lock_outline,
                            walk_outline, validate_outline_state)
 from .section_writer import write_sections, approve_section
+from .consistency import analyze_consistency
 
 
 def extract_source(source: Path) -> str:
@@ -161,6 +162,9 @@ def main(argv=None):
     approving.add_argument("--section", required=True)
     approving.add_argument("--acknowledgement", required=True,
                            help="必须填写真实人工复核确认句，不得由模型代替")
+    consistency = sub.add_parser("consistency-audit", help="本地跨章节承诺一致性审查")
+    consistency.add_argument("project_dir", type=Path)
+    consistency.add_argument("--output", type=Path, help="保存结构化审查报告 JSON")
     args = parser.parse_args(argv)
     try:
         if args.command == "init":
@@ -173,6 +177,17 @@ def main(argv=None):
             index_path = args.output.with_suffix(".index.json")
             write_json(index_path, extracted.index)
             print(f"已提取：{args.output}；证据索引：{index_path}。请人工核对缺失文本和提取警告。")
+        elif args.command == "consistency-audit":
+            report = analyze_consistency(args.project_dir)
+            if args.output:
+                write_json(args.output, report)
+            print(f"跨章节扫描：{report['statistics']['sections_inspected']} 节；"
+                  f"明确承诺 {report['statistics']['commitments_detected']} 处；"
+                  f"冲突 {report['statistics']['errors']} 个；"
+                  f"提示 {report['statistics']['warnings']} 个。")
+            for item in report["findings"]:
+                print(f"[{item['severity']}] {item['code']}：{item['message']}")
+            return 0 if report["ok"] else 1
         elif args.command == "write-sections":
             report = write_sections(args.project_dir, args.section, args.index,
                                     args.source_dir, model=args.model,
