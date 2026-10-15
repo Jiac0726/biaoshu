@@ -135,3 +135,22 @@ python -m biaoshu review-import ./workspaces/my-bid --suggestions ./workspaces/m
 ```
 
 默认仅预览。程序核对候选文件的 SHA-256、逐条审批、原件指纹，并重新解析原件对照证据索引；通过后只追加正式需求及一一对应叶子章节，保留已有正文，在本地 reports/review-backups 保存导入前备份。scoring_rule 不允许直接创建章节。人工确认字段是操作者声明，不是身份认证；严禁模型代填。目录目前仅为平面初稿，仍需语义审查及多级规划。
+
+
+## 层级目录规划与一级目录锁定（开发分支）
+
+在 review-import 产生 R#/S# 响应关系之后，可单独编辑“目录展示树”，不重写 S# 章节或正文：
+
+```bash
+python -m biaoshu outline-init ./workspaces/my-bid --output ./workspaces/my-bid/reports/outline-proposal.json
+# 手动编辑 outline-proposal.json 的 roots；可将叶子 {"section_id":"S1"}、{"section_id":"S2"} 分组为：
+# {"id":"G1","title":"项目实施与进度","children":[{"section_id":"S1"},{"section_id":"S2"}]}
+python -m biaoshu outline-plan ./workspaces/my-bid --proposal ./workspaces/my-bid/reports/outline-proposal.json
+python -m biaoshu outline-plan ./workspaces/my-bid --proposal ./workspaces/my-bid/reports/outline-proposal.json --apply
+# 仅在用户确实确认一级目录后显式执行：
+python -m biaoshu outline-lock ./workspaces/my-bid --confirm
+```
+
+自动验证目录节点、唯一章节覆盖、深度不超过 4 层、拒绝无意义单子节点分组；默认预览不修改文件，明确 --apply 后才写 outline.json，先备份至 reports/outline-backups。层级 Word 导出按树的顺序生成标题。锁定将保护一级节点名称、顺序及其对应章节集合，允许组内下级排序调整。check、audit、export 均检查目录锁；即使 --draft 也不能导出损坏的层级树。
+
+如果已经建立层级目录，review-import 会拒绝直接追加新的 S# 章节，避免遗漏映射或丢失用户确认的目录；需先审查并调整目录结构。该功能为**结构编辑与锁定**，尚非基于模型的自动语义目录规划。目录锁属于本地防误改约束，不是数字签名或抗恶意篡改方案。
