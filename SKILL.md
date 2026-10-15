@@ -136,3 +136,10 @@ Python 3.10+。在本仓库目录运行：
 ## 全文一致性审查（新增确定性检查）
 
 每次完成正文后运行 consistency-audit <项目目录> --output <本地报告.json>，并结合 check/audit 查看各章工期、服务期限、质保期和响应时限的明确数值矛盾。每条发现包括章节 ID、行号、原句；与已核实 facts.json 基线的冲突作为严格审核阻断项，pending 的确定性数值承诺提示人工复核。禁止仅因程序没有发现冲突便宣称事实完全一致。Agent 仍须通读材料审查人员、设备、价格、施工范围、标准版本、服务承诺及否决条款。
+
+
+## 评分项→正文响应原句的人工追溯门禁
+
+正文定稿后可运行 trace-init 创建 reports/response-trace.json；对每个 requirement ID 和 response_sections 的组合，审稿人需要亲自填写具体章节行号、原句以及 decision=confirmed，并填写明确的 acknowledgement。不得由模型伪造审稿人确认或把章节标题充当实际响应。
+
+trace-audit 可将遗漏、过时的章节 SHA、错误行号、伪造原句和未确认映射以 JSON/CLI 返回。启用台账后严格 audit 和正式 export 检查所有关系；未启用的旧项目仅发出缺少语义追溯警告，以保持已有流程兼容。机械校验确认的是文本锚点存在，而不是评分项在业务语义上已满足。

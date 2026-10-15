@@ -16,6 +16,7 @@ from .outline_tree import (outline_template, outline_plan, lock_outline,
                            walk_outline, validate_outline_state)
 from .section_writer import write_sections, approve_section
 from .consistency import analyze_consistency
+from .response_trace import create_trace, audit_trace
 
 
 def extract_source(source: Path) -> str:
@@ -165,6 +166,11 @@ def main(argv=None):
     consistency = sub.add_parser("consistency-audit", help="本地跨章节承诺一致性审查")
     consistency.add_argument("project_dir", type=Path)
     consistency.add_argument("--output", type=Path, help="保存结构化审查报告 JSON")
+    trace_init = sub.add_parser("trace-init", help="建立需逐项人工填写的评分响应段落台账，不覆盖旧记录")
+    trace_init.add_argument("project_dir", type=Path)
+    trace_audit = sub.add_parser("trace-audit", help="只读审查评分要求到正文原句的人工确认记录")
+    trace_audit.add_argument("project_dir", type=Path)
+    trace_audit.add_argument("--output", type=Path, help="保存本地 JSON 审查报告")
     args = parser.parse_args(argv)
     try:
         if args.command == "init":
@@ -177,6 +183,21 @@ def main(argv=None):
             index_path = args.output.with_suffix(".index.json")
             write_json(index_path, extracted.index)
             print(f"已提取：{args.output}；证据索引：{index_path}。请人工核对缺失文本和提取警告。")
+        elif args.command == "trace-init":
+            result = create_trace(args.project_dir)
+            print(f"已创建待人工填写的响应追溯台账：{result['path']}，"
+                  f"需核对 {result['items']} 个需求与章节关联。")
+        elif args.command == "trace-audit":
+            result = audit_trace(args.project_dir)
+            if args.output:
+                write_json(args.output, result)
+            print(f"评分响应定位审查：{result['status']}；"
+                  f"已确认 {result['statistics']['confirmed_links']}/"
+                  f"{result['statistics']['expected_links']} 项；"
+                  f"待解决 {result['statistics']['errors']} 个。")
+            for item in result["findings"]:
+                print(f"{item['code']}：{item['message']} [{item['requirement_id']}/{item['section_id']}]")
+            return 0 if result["ok"] else 1
         elif args.command == "consistency-audit":
             report = analyze_consistency(args.project_dir)
             if args.output:

@@ -54,3 +54,8 @@
 ## 2026-10-15 — 跨全部 CLI 的虚构项目工程验收
 
 新增 `tests/test_pipeline_e2e.py` 与 `docs/e2e-acceptance.md`，串联文件提取、候选、模拟 AI、人工审批的测试模拟、目录锁、独立草稿、审计和 DOCX，补回归：中断恢复、原文件变化、批准后正文变化。本轮仅验证工程可运行性，不将模拟模型或模拟人工确认包装为真实招标业务验收。
+
+
+## 2026-10-15 — 第九轮：评分项到正文响应段落追溯
+
+新增 response_trace.py、trace-init/trace-audit，采用固定本地 reports/response-trace.json 台账。每个 requirement→section 映射由人工挑选原句、输入行号、确认后，工具才机械验证正文 SHA、映射快照和逐字引用。已启用台账会增强严格 audit/非草稿 export 的失败关闭；未启用台账时明确 warning，不破坏此前兼容性。此项只是语义审核的证据锚点，不等于模型理解评分标准或验证投标合规。
