@@ -55,6 +55,12 @@ class ScoreCandidatesTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "已变化"):
             self.run_discovery()
 
+    def test_forged_scoring_block_with_correct_source_hash_is_rejected(self):
+        self.blocks[1]["text"] = "模型伪造的评分表条目：100分"
+        self.save_index()
+        with self.assertRaisesRegex(ValueError, "索引与招标原件解析结果不一致"):
+            self.run_discovery()
+
     def test_duplicate_indexes_are_rejected(self):
         with self.assertRaisesRegex(ValueError, "同名原件"):
             discover_score_candidates([self.index, self.index], self.src)
