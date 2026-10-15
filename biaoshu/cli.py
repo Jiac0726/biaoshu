@@ -15,7 +15,7 @@ from .review_import import review_template, reviewed_import
 from .review_transaction import recover as recover_review
 from .outline_tree import (outline_template, outline_plan, lock_outline,
                            walk_outline, validate_outline_state)
-from .section_writer import write_sections, approve_section
+from .section_writer import write_sections, approve_section, accept_manual_section
 from .section_transaction import recover as recover_section
 from .consistency import analyze_consistency
 from .response_trace import create_trace, audit_trace
@@ -190,6 +190,10 @@ def main(argv=None):
     recovery = sub.add_parser("review-recover", help="中断的审核导入按事务备份恢复，绝不合并未知外部改动")
     recovery.add_argument("project_dir", type=Path)
     recovery.add_argument("--confirm", action="store_true")
+    manual = sub.add_parser("section-manual", help="已手动补写的失败章节：归档失败 AI 检查点、接受人工接管（不签署 AI）")
+    manual.add_argument("project_dir", type=Path)
+    manual.add_argument("--section", required=True)
+    manual.add_argument("--confirm", action="store_true")
     recover_chapter = sub.add_parser("section-recover", help="人工确认后恢复中断的章节写入；拒绝覆盖未知修改")
     recover_chapter.add_argument("project_dir", type=Path)
     recover_chapter.add_argument("--section", required=True)
@@ -260,7 +264,15 @@ def main(argv=None):
         elif args.command == "section-recover":
             result = recover_section(args.project_dir, args.section,
                                      confirm=args.confirm, unlock_stale=args.unlock_stale)
-            print(f"章节 {result['section_id']} 已回退至本次 AI 写入前状态，可重新运行写作。")
+            if result["status"] == "stale_lock_cleared":
+                print(f"章节 {result['section_id']} 孤立写入锁已在操作员确认后解除。")
+            else:
+                print(f"章节 {result['section_id']} 已回退至本次写入或审批事务之前，可重新执行。")
+        elif args.command == "section-manual":
+            result = accept_manual_section(args.project_dir, args.section,
+                                           confirm=args.confirm)
+            print(f"章节 {result['section_id']} 已人工接管；"
+                  f"旧失败 AI 检查点已归档：{result['archive']}。此操作不是 AI 审批。")
         elif args.command == "approve-section":
             result = approve_section(args.project_dir, args.section,
                                      acknowledgement=args.acknowledgement)
