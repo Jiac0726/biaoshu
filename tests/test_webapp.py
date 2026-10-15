@@ -9,6 +9,7 @@ import urllib.request
 from pathlib import Path
 
 from biaoshu.webapp import Workspace, WebError, make_server
+from biaoshu.core import write_json
 
 
 class WebWorkspaceTests(unittest.TestCase):
@@ -67,6 +68,10 @@ class WebWorkspaceTests(unittest.TestCase):
         self.assertEqual(self.workspace.snapshot(self.project)["review"]["acknowledgement"], "")
 
     def test_human_approval_requires_explicit_confirmation(self):
+        root = self.workspace.root / self.project
+        write_json(root / "outline.json", {"sections": [
+            {"id": "S1", "title": "示例章节", "requirement_ids": ["R1"], "weight": 1.0, "target_words": 0}
+        ]})
         with self.assertRaisesRegex(WebError, "本人"):
             self.workspace.action(self.project, {"action": "approve", "section": "S1"})
         with self.assertRaisesRegex(WebError, "人工二次确认"):
