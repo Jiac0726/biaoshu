@@ -26,7 +26,8 @@ def _digest(path: Path) -> str:
 
 def _read_suggestions(path: Path) -> list[dict]:
     data = read_json(path)
-    if (not isinstance(data, dict) or data.get("schema_version") != 1
+    if (not isinstance(data, dict) or type(data.get("schema_version")) is not int
+            or data["schema_version"] != 1
             or data.get("status") != "suggestions_only"
             or not isinstance(data.get("candidates"), list)):
         raise ValueError("候选文件必须是 suggestions_only 类型的完整 JSON")
@@ -55,7 +56,7 @@ def _ambiguous_candidates(suggestions_path: Path, candidates: list[dict]) -> lis
                 or not isinstance(item.get("score_options"), list)
                 or len(item["score_options"]) < (1 if item.get("reason") == "adjustment_rule" else 2)
                 or any(isinstance(v, bool) or not isinstance(v, (int, float))
-                       or not math.isfinite(v) or not 0 <= v <= 100
+                       or not math.isfinite(v) or not 0 <= v <= 999
                        for v in item["score_options"])
                 or not isinstance(item.get("evidence"), dict)
                 or any(not isinstance(item["evidence"].get(key), str)
