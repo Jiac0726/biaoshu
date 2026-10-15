@@ -77,11 +77,15 @@ class SyntheticBidPipelineTests(unittest.TestCase):
         self.assertNotIn("虚构的未批准人员", prompt)
         self.assertEqual(payload["facts"][0]["value"], "30日")
         rid = payload["requirements"][0]["id"]
+        sid = payload["section_id"]
+        marker = {"S1": "【S1专属：组织调度与里程碑安排】",
+                  "S2": "【S2专属：质量抽检与闭环整改】"}[sid]
         return json.dumps({
             "body": (
                 "按照项目评分要求，采用负责人统筹、工作组执行、质量人员复核的工作机制。"
                 "项目工期为30日，按照任务节点安排实施检查，并记录问题、整改过程和交付资料。"
                 "所有岗位安排以最终审核的人力配置为准，未经确认不写入具体人员名单。"
+                + marker
             ),
             "used_requirement_ids": [rid], "used_fact_keys": ["project_duration"],
         }, ensure_ascii=False)
@@ -109,10 +113,19 @@ class SyntheticBidPipelineTests(unittest.TestCase):
                                   "--output", str(self.review)), 0)
         review = read_json(self.review)
         self.assertEqual([x["decision"] for x in review["decisions"]], ["pending", "pending"])
+        immutable_before = {
+            name: (self.project / name).read_bytes()
+            for name in ("project.json", "requirements.json", "outline.json", "facts.json")
+        }
         self.assertEqual(self.cli("review-import", str(self.project),
                                   "--suggestions", str(self.candidates),
                                   "--review", str(self.review),
                                   *self.source_args(), "--apply"), 2)
+        for name, original in immutable_before.items():
+            self.assertEqual((self.project / name).read_bytes(), original,
+                             f"rejected pending review mutated {name}")
+        self.assertFalse((self.project / "reports" / "review-import-transaction.json").exists())
+        self.assertFalse(list((self.project / "reports").glob("review-backups/*")))
         for decision in review["decisions"]:
             decision["decision"] = "accept"
         review["acknowledgement"] = ACKNOWLEDGEMENT
@@ -179,6 +192,9 @@ class SyntheticBidPipelineTests(unittest.TestCase):
         self.assertFalse(self.outfile.exists())
         self.approve_all()
         self.assertEqual(self.cli("consistency-audit", str(self.project)), 0)
+        checked = self.root / "check-clean.json"
+        self.assertEqual(self.cli("check", str(self.project), "--output", str(checked)), 0)
+        self.assertTrue(read_json(checked)["ok"])
         final_audit = self.root / "final-audit.json"
         self.assertEqual(self.cli("audit", str(self.project), *self.source_args(),
                                   "--output", str(final_audit)), 0)
@@ -195,6 +211,20 @@ class SyntheticBidPipelineTests(unittest.TestCase):
         full_text = "\n".join(p.text for p in doc.paragraphs)
         self.assertIn("项目工期为30日", full_text)
         self.assertNotIn(BANNER, full_text)
+        markers = {"实施组织方案": "【S1专属：组织调度与里程碑安排】",
+                   "质量保障措施": "【S2专属：质量抽检与闭环整改】"}
+        for title, marker in markers.items():
+            heading_index = next(i for i, p in enumerate(doc.paragraphs)
+                                 if p.text == title and p.style.name.startswith("Heading"))
+            next_heading = next((i for i in range(heading_index + 1, len(doc.paragraphs))
+                                 if doc.paragraphs[i].style.name.startswith("Heading")),
+                                len(doc.paragraphs))
+            chapter_text = "\n".join(p.text for p in doc.paragraphs[heading_index+1:next_heading])
+            self.assertIn(marker, chapter_text, f"missing {title} content")
+            for other_marker in markers.values():
+                self.assertEqual(other_marker in chapter_text, other_marker == marker,
+                                 f"wrong section body assigned to {title}")
+            self.assertEqual(full_text.count(marker), 1, "duplicated or omitted section body")
         self.assertEqual(len([c for c in self.model_calls if c[0] == "write"]), 2)
 
     def test_e2e_response_trace_review_gate_and_current_paragraph_locations(self):
@@ -276,6 +306,41 @@ class SyntheticBidPipelineTests(unittest.TestCase):
         self.approve_all()
         self.original.write_text("已替换的虚构招标文本", encoding="utf-8")
         self.assertEqual(self.cli("audit", str(self.project), *self.source_args()), 1)
+        self.assertNotEqual(self.cli("export", str(self.project), *self.source_args(),
+                                     "--output", str(self.outfile)), 0)
+        self.assertFalse(self.outfile.exists())
+
+    def test_consistency_blocks_without_any_ai_approval_sidecar(self):
+        """Prove audit/export rejection is caused by consistency, not an obsolete AI SHA."""
+        self.prepare_reviewed_outline()
+        one = self.project / "sections" / "S1.md"
+        two = self.project / "sections" / "S2.md"
+        one.write_text("# 实施组织方案\n\n项目工期为30日，按工作节点推进项目实施与过程检查。\n",
+                       encoding="utf-8")
+        two.write_text("# 质量保障措施\n\n项目工期为30日，按质量标准落实资料复核和成果审定。\n",
+                       encoding="utf-8")
+        self.assertEqual(self.cli("audit", str(self.project), *self.source_args()), 0)
+        two.write_text("# 质量保障措施\n\n项目工期为45日，按质量标准落实资料复核和成果审定。\n",
+                       encoding="utf-8")
+        for sid in ("S1", "S2"):
+            self.assertFalse((self.project / "reports" / "section-writing"
+                              / (sid + ".json")).exists())
+        normal = self.root / "check-conflict.json"
+        self.assertEqual(self.cli("check", str(self.project), "--output", str(normal)), 0)
+        check_result = read_json(normal)
+        self.assertTrue(check_result["ok"])  # normal check warns rather than hard-rejects
+        self.assertTrue(any("cross_section_conflict" in w
+                            for w in check_result["warnings"]))
+        conflict_audit = self.root / "audit-conflict.json"
+        self.assertEqual(self.cli("audit", str(self.project), *self.source_args(),
+                                  "--output", str(conflict_audit)), 1)
+        strict = read_json(conflict_audit)
+        self.assertFalse(strict["ok"])
+        self.assertGreater(strict["consistency"]["statistics"]["errors"], 0)
+        self.assertTrue(any(x["code"] == "cross_section_conflict"
+                            for x in strict["consistency"]["findings"]))
+        self.assertTrue(any("cross_section_conflict" in e for e in strict["errors"]))
+        self.assertFalse(any("审批" in e or "正文已更改" in e for e in strict["errors"]))
         self.assertNotEqual(self.cli("export", str(self.project), *self.source_args(),
                                      "--output", str(self.outfile)), 0)
         self.assertFalse(self.outfile.exists())
