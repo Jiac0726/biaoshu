@@ -296,6 +296,8 @@ class Workspace:
                 write_json(review_path, review)
                 result = {"ok": True, "message": "审核决定已保存。只有本人确实逐项核对原文才能勾选确认。"}
             elif action in {"review-preview", "review-apply"}:
+                if action == "review-apply" and payload.get("confirmed") is not True:
+                    raise WebError("正式登记需求须人工二次确认")
                 suggestions = self._selected_report(root, meta, "suggestions")
                 review = self._selected_report(root, meta, "review")
                 source_dir, indexes = self._source_paths(root)
@@ -435,6 +437,8 @@ class Workspace:
                 result = self._run(*args)
                 meta["semantic"] = dest.name
             elif action in {"draft-export", "final-export"}:
+                if action == "final-export" and payload.get("confirmed") is not True:
+                    raise WebError("正式 Word 导出必须由操作者确认已完成终审")
                 output = root / "output" / (
                     ("draft" if action == "draft-export" else "technical-bid")
                     + "-" + secrets.token_hex(5) + ".docx")
