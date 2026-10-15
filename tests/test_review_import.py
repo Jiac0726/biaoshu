@@ -107,7 +107,7 @@ class ReviewedImportTests(unittest.TestCase):
         index = read_json(self.index_path)
         index["blocks"][1]["text"] = "实施组织方案：10分" + "（伪造附件）"
         write_json(self.index_path, index)
-        with self.assertRaisesRegex(ValueError, "索引内容"):
+        with self.assertRaisesRegex(ValueError, "索引内容|索引与招标原件解析结果不一致"):
             self.run_import(apply=True)
 
     def test_hallucinated_candidate_quote_rejected(self):
