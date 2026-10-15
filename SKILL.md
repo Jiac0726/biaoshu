@@ -143,3 +143,10 @@ Python 3.10+。在本仓库目录运行：
 正文定稿后可运行 trace-init 创建 reports/response-trace.json；对每个 requirement ID 和 response_sections 的组合，审稿人需要亲自填写具体章节行号、原句以及 decision=confirmed，并填写明确的 acknowledgement。不得由模型伪造审稿人确认或把章节标题充当实际响应。
 
 trace-audit 可将遗漏、过时的章节 SHA、错误行号、伪造原句和未确认映射以 JSON/CLI 返回。启用台账后严格 audit 和正式 export 检查所有关系；未启用的旧项目仅发出缺少语义追溯警告，以保持已有流程兼容。机械校验确认的是文本锚点存在，而不是评分项在业务语义上已满足。
+
+
+## AI 语义审稿（禁止代替人工确认）
+
+先执行 trace-init 并由真实审稿人逐项补齐定位，再使用 trace-audit 确保所有评分项对应的响应段落被确认。随后可运行 semantic-review <项目目录> --index <招标来源索引> --source-dir <原始招标目录> --model <明确选定的本地模型> --output <审稿建议JSON>。它按每条需求与章节映射调用模型，只输出带双侧可验证引文的建议，不会更改 requirements、正文、trace 文件或人工审批状态。
+
+模型可标记 adequate、partial、missing、uncertain，并给出 risk、理由及建议，所有结果均 pending_human_review。不得把模型 adequate 当作审稿人批准，不得将部分段落判断当作招标全文语义验收。默认禁止外发云模型；用户明确授权外发真实材料后才能设置 --allow-remote。
