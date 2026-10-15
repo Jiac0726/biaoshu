@@ -199,10 +199,21 @@ def inspect(root: Path, strict: bool = False) -> dict:
             errors.append(detail)
         else:
             warnings.append(detail)
+    from .response_trace import audit_trace, trace_path
+    trace = audit_trace(root)
+    if trace_path(root).exists():
+        for finding in trace["findings"]:
+            message = f"正文响应追溯[{finding['code']}]：{finding['message']}"
+            if strict:
+                errors.append(message)
+            else:
+                warnings.append(message)
+    else:
+        warnings.append("尚未建立评分项→正文段落追溯台账；结构通过不代表评分条款已回应")
     observations.append("仅机械校验，无法替代 AI 语义评分覆盖、矛盾识别及人工终审")
     return {"ok": not errors, "errors": errors, "warnings": warnings,
             "statistics": {"requirements": len(requirements), "sections": len(sections), "facts": len(facts)},
-            "consistency": consistency, "notes": observations}
+            "consistency": consistency, "response_trace": trace, "notes": observations}
 
 
 def allocate(root: Path, total: int):
