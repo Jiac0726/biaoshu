@@ -53,6 +53,24 @@ def stage(root: Path, sid: str, markdown: bytes, checkpoint: bytes, *,
     return marker
 
 
+def _reject_live_lock_owner(lock: Path) -> None:
+    """Never roll back a journal while its writing/approval owner is alive."""
+    try:
+        owner = json.loads(lock.read_text(encoding="utf-8"))
+        pid = owner.get("pid") if isinstance(owner, dict) else None
+    except (OSError, ValueError):
+        pid = None  # Historic locks without a PID require explicit confirmation.
+    if type(pid) is int and pid > 0:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            pass
+        except (PermissionError, OSError) as exc:
+            raise ValueError("无法证明章节写入或审批进程已结束，禁止恢复") from exc
+        else:
+            raise ValueError("章节写入或审批进程仍然存活，拒绝恢复或清理活动锁")
+
+
 def recover(root: Path, sid: str, *, confirm: bool = False,
             unlock_stale: bool = False) -> dict:
     """Roll back only known before/after versions. Never overwrite manual edits."""
@@ -66,24 +84,15 @@ def recover(root: Path, sid: str, *, confirm: bool = False,
             raise ValueError("该章节没有待恢复的写作事务")
         if not unlock_stale:
             raise ValueError("写入进程可能已中断，请先确认进程停止，再同时指定 --confirm --unlock-stale")
-        try:
-            owner = json.loads(lock.read_text(encoding="utf-8"))
-            pid = owner.get("pid") if isinstance(owner, dict) else None
-        except (OSError, ValueError):
-            pid = None
-        if type(pid) is int and pid > 0:
-            try:
-                os.kill(pid, 0)
-            except ProcessLookupError:
-                pass
-            except (PermissionError, OSError) as exc:
-                raise ValueError("无法证明章节写入进程已结束，禁止自动清理锁") from exc
-            else:
-                raise ValueError("原章节写入进程仍然存活，拒绝清除活动锁")
+        _reject_live_lock_owner(lock)
         lock.unlink()
         return {"section_id": sid, "status": "stale_lock_cleared"}
-    if lock.exists() and not unlock_stale:
-        raise ValueError("存在写入锁；确认原写作进程已经结束，再显式指定 --unlock-stale")
+    if lock.exists():
+        if not unlock_stale:
+            raise ValueError("存在写入锁；确认原写作进程已经结束，再显式指定 --unlock-stale")
+        # --unlock-stale is never an override for a LIVE approver, even
+        # when a write-ahead journal exists. This check must precede writes.
+        _reject_live_lock_owner(lock)
     payload = read_json(marker)
     if (not isinstance(payload, dict) or payload.get("schema_version") != 1
             or payload.get("section_id") != sid
