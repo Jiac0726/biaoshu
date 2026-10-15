@@ -7,8 +7,7 @@
 
 ```bash
 python -m pip install -e '.[docs]'
-python -m unittest tests.test_pipeline_e2e -v
-# 若测试目录不是 package，可使用：
+# tests 目录不是 Python package，使用 discover 指定测试文件：
 python -m unittest discover -s tests -p 'test_pipeline_e2e.py' -v
 python -m unittest discover -s tests -v
 ```
