@@ -46,7 +46,8 @@ def _check_result(raw: str, source: str, response: str) -> dict:
                 "source_quote", "response_quote"}
     if not isinstance(payload, dict) or set(payload) != expected:
         raise ValueError("审稿模型未按约定返回全部字段")
-    if payload["verdict"] not in _VERDICTS or payload["severity"] not in _SEVERITIES:
+    if (not isinstance(payload["verdict"], str) or payload["verdict"] not in _VERDICTS
+            or not isinstance(payload["severity"], str) or payload["severity"] not in _SEVERITIES):
         raise ValueError("审稿结论或严重程度不在允许范围内")
     for key in ("reason", "suggestion"):
         v = payload[key]
