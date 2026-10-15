@@ -94,3 +94,14 @@ python -m biaoshu export ./workspaces/my-bid --draft --output ./output/draft.doc
 ```
 
 说明：`check` 可不提供证据索引，但结果会明确标记 `not_checked`；`audit` 与非草稿 `export` 必须同时提供 `--index` 和 `--source-dir`，并验证源文件指纹及逐条引用。多份招标文件可重复传入 `--index`。草稿例外仅允许生成显著标识未完成校验的文档，不代表证据可信。文本匹配不能替代评分语义判断、条款完整性检查与人工终审。
+
+
+## 技术评分项候选（本轮新功能）
+
+先运行 `extract` 建立招标原件的 SHA-256 证据索引，再使用以下命令产生技术评分项候选：
+
+```bash
+python -m biaoshu score-candidates --index ./workspaces/my-bid/tender-extracted.index.json --source-dir ./sources --output ./workspaces/my-bid/reports/score-candidates.json
+```
+
+索引可通过多次 `--index` 传入，`--source-dir` 必须包含未修改的原始招标文件。每条候选均含原文定位和逐字引用，并标记 `pending_review`。结果的顶层 `status=suggestions_only`，**不会写入 requirements.json**。该工具是保守的规则筛查：对无显式分值、综合分档与复杂表格会漏检；必须由 Agent/人工审查原文，区分技术评分大项与评分规则、商务/报价因素，并补全遗漏后才能形成正式需求。
