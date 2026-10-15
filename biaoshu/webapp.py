@@ -192,6 +192,11 @@ class Workspace:
                         audit = record
                 except (WebError, OSError, ValueError):
                     pass
+            semantic = None
+            try:
+                semantic = read_json(self._selected_report(root, meta, "semantic"))
+            except (WebError, OSError, ValueError):
+                pass
             trace = read_json(trace_path(root)) if trace_path(root).is_file() else None
             sections = []
             for section in project["outline.json"].get("sections", []):
@@ -225,7 +230,7 @@ class Workspace:
                 "facts": project["facts.json"].get("facts", []),
                 "outline": project["outline.json"], "sections": sections,
                 "suggestions": suggestions, "review": review, "outline_proposal": outline_proposal,
-                "audit": audit, "trace": trace, "exports": exports,
+                "audit": audit, "trace": trace, "semantic": semantic, "exports": exports,
                 "report_selection": {k: meta.get(k) for k in ("suggestions", "review", "outline")},
             }
 
