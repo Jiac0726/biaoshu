@@ -94,7 +94,7 @@ def analyze_consistency(root: Path, state: dict | None = None) -> dict:
         # an unrelated type of duration. Require an explicit category.
         if key in generic_duration_keys:
             category = fact.get("category")
-            if category not in _LABELS:
+            if not isinstance(category, str) or category not in _LABELS:
                 if fact.get("status") == "verified":
                     mapping_findings.append({
                         "severity": "error", "code": "ambiguous_verified_duration",
