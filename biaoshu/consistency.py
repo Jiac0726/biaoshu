@@ -36,6 +36,10 @@ _FACT_VALUE = re.compile(
 )
 _UNIT_NAMES = {"天": "日", "日": "日", "个月": "月", "月": "月",
                "年": "年", "小时": "小时"}
+# Skip explicitly hypothetical, example or negated clauses; these are not
+# deterministic commitments and must be interpreted by a human reviewer.
+_NON_ASSERTED = re.compile(r"若|如果|假如|假设|假定|例如|举例|示例|样例|并非|不是|不代表")
+
 _DESCRIPTIONS = {
     "project_duration": "项目工期",
     "service_duration": "服务期限",
@@ -108,6 +112,11 @@ def analyze_consistency(root: Path, state: dict | None = None) -> dict:
             if in_code or not trimmed or trimmed.startswith((">", "#", "|")):
                 continue
             for match in _STATEMENT.finditer(line):
+                # Look only within the clause containing this statement.
+                # Conditional examples must not become hard export blockers.
+                prefix = re.split(r"[。；;！!？?]", line[:match.start()])[-1]
+                if _NON_ASSERTED.search(prefix):
+                    continue
                 cat = _category(match.group("label"))
                 value, unit = _quantity(match.group("value"), match.group("unit"))
                 observations.append({
