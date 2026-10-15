@@ -70,6 +70,9 @@ def words(text: str) -> int:
 
 def inspect(root: Path, strict: bool = False) -> dict:
     errors, warnings, observations = [], [], []
+    from .review_transaction import journal_path
+    if journal_path(root).exists():
+        errors.append("检测到审核导入未完成的事务，禁止审核或导出；请执行 review-recover --confirm")
     try:
         data = load_project(root)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
