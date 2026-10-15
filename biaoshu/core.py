@@ -25,7 +25,10 @@ def read_json(path: Path):
 def write_json(path: Path, value):
     path.parent.mkdir(parents=True, exist_ok=True)
     temp = path.with_name(path.name + ".tmp")
-    temp.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    # All checkpoints/journals use SHA-256 over exact UTF-8 bytes. A text-mode
+    # write silently changes LF to CRLF on Windows, invalidating those hashes.
+    raw = (json.dumps(value, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+    temp.write_bytes(raw)
     temp.replace(path)
 
 
