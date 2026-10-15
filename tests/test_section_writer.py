@@ -77,6 +77,55 @@ class SectionWriterTests(unittest.TestCase):
         self.assertIn("项目工期为30日", self.calls[0][2])
         self.assertFalse(inspect(self.project, strict=True)["ok"])
 
+    def test_verified_generic_duration_category_is_sent_to_model(self):
+        write_json(self.project / "facts.json", {"facts": [{
+            "key": "duration", "category": "service_duration",
+            "status": "verified", "value": "30日",
+            "evidence": {"file": "tender.txt", "location": "第3行",
+                         "quote": "项目工期为30日"},
+        }]})
+        inputs = []
+        def model(endpoint, model, prompt, *, api_key, timeout, instructions):
+            inputs.append((json.loads(prompt.split("\n", 1)[1]), instructions))
+            return self.answer("R1", ["duration"])
+        report = write_section(
+            self.project, "S1", [self.index], self.source_dir,
+            model="local-demo", transport=model)
+        self.assertEqual(report["status"], "pending_review")
+        fact = inputs[0][0]["facts"][0]
+        self.assertEqual(fact["category"], "service_duration")
+        self.assertEqual(fact["value"], "30日")
+        self.assertIn("严格区分", inputs[0][1])
+
+    def test_verified_generic_duration_without_category_never_sent_to_model(self):
+        write_json(self.project / "facts.json", {"facts": [{
+            "key": "duration", "status": "verified", "value": "30日",
+            "evidence": {"file": "tender.txt", "location": "第3行",
+                         "quote": "项目工期为30日"},
+        }]})
+        with self.assertRaisesRegex(ValueError, "缺少 category"):
+            self.one()
+        self.assertEqual(self.calls, [])
+
+    def test_invalid_generic_duration_category_is_not_sent_to_model(self):
+        write_json(self.project / "facts.json", {"facts": [{
+            "key": "duration", "category": "unsupported", "status": "verified",
+            "value": "30日",
+            "evidence": {"file": "tender.txt", "location": "第3行",
+                         "quote": "项目工期为30日"},
+        }]})
+        with self.assertRaisesRegex(ValueError, "不受支持|不是受支持"):
+            self.one()
+        self.assertEqual(self.calls, [])
+
+    def test_other_fact_category_is_preserved_without_duration_restrictions(self):
+        state = read_json(self.project / "facts.json")
+        state["facts"][0]["category"] = "schedule_assumption"
+        write_json(self.project / "facts.json", state)
+        self.one()
+        data = json.loads(self.calls[0][2].split("\n", 1)[1])
+        self.assertEqual(data["facts"][0]["category"], "schedule_assumption")
+
     def test_existing_human_text_is_never_overwritten_or_sent_to_model(self):
         file = self.project / "sections" / "S1.md"
         file.write_text("客户已确认并手工写好的实施计划", encoding="utf-8")
