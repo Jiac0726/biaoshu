@@ -92,6 +92,7 @@ function render() {
   renderSections(data);
   renderTrace(data);
   renderAudit(data);
+  renderSemantic(data);
   renderDownloads(data);
 }
 function renderSources(data) {
@@ -246,6 +247,23 @@ function renderAudit(data) {
     (issues.length ? "<ul>" + issues.map((x) => "<li>" + esc(x) + "</li>").join("") + "</ul>" : "") +
     "</div>";
 }
+function renderSemantic(data) {
+  const report = data.semantic;
+  if (!report) { $("semanticArea").innerHTML = ""; return; }
+  const list = report.items || [];
+  const stats = report.statistics || {};
+  $("semanticArea").innerHTML =
+    '<div class="mini-heading">AI 语义审稿建议 · ' + esc(stats.examined_links || 0) +
+    ' 条响应关系 · 潜在问题 ' + esc(stats.potential_issues || 0) +
+    ' 项（全部待人工复核）</div>' +
+    list.map((item) => '<div class="suggestion-row"><div class="candidate-body"><strong>' +
+      esc(item.requirement_id) + ' → ' + esc(item.section_id) +
+      ' · ' + esc(item.verdict) + '</strong><div class="candidate-sub">' +
+      esc(item.reason || "") + '</div><div class="candidate-sub">修订建议：' +
+      esc(item.suggestion || "") + '</div></div><span class="candidate-pill">' +
+      esc(item.severity || "") + '</span></div>').join("");
+}
+
 function renderDownloads(data) {
   const files = data.exports || [];
   $("exportList").innerHTML = files.length ? '<div class="mini-heading">已导出的 Word 文档</div>' +
