@@ -33,6 +33,26 @@ def _snapshot(path: Path, expected: bytes) -> dict:
     }
 
 
+
+def _assert_lock_owner_stopped(lock: Path) -> None:
+    """Fail closed for a known live or uninspectable lock owner."""
+    try:
+        owner = json.loads(lock.read_text(encoding="utf-8"))
+    except (ValueError, UnicodeError):
+        # Legacy unstructured locks require the explicit --unlock-stale flag.
+        return
+    except OSError as exc:
+        raise ValueError("无法读取章节写入锁，拒绝清理") from exc
+    pid = owner.get("pid") if isinstance(owner, dict) else None
+    if type(pid) is int and pid > 0:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return
+        except (PermissionError, OSError) as exc:
+            raise ValueError("无法证明章节写入进程已结束，禁止自动清理锁") from exc
+        raise ValueError("原章节写入进程仍然存活，拒绝清除活动锁")
+
 def stage(root: Path, sid: str, markdown: bytes, checkpoint: bytes, *,
           status: str = "writing") -> Path:
     """Create a journal before touching either destination."""
@@ -66,24 +86,13 @@ def recover(root: Path, sid: str, *, confirm: bool = False,
             raise ValueError("该章节没有待恢复的写作事务")
         if not unlock_stale:
             raise ValueError("写入进程可能已中断，请先确认进程停止，再同时指定 --confirm --unlock-stale")
-        try:
-            owner = json.loads(lock.read_text(encoding="utf-8"))
-            pid = owner.get("pid") if isinstance(owner, dict) else None
-        except (OSError, ValueError):
-            pid = None
-        if type(pid) is int and pid > 0:
-            try:
-                os.kill(pid, 0)
-            except ProcessLookupError:
-                pass
-            except (PermissionError, OSError) as exc:
-                raise ValueError("无法证明章节写入进程已结束，禁止自动清理锁") from exc
-            else:
-                raise ValueError("原章节写入进程仍然存活，拒绝清除活动锁")
+        _assert_lock_owner_stopped(lock)
         lock.unlink()
         return {"section_id": sid, "status": "stale_lock_cleared"}
     if lock.exists() and not unlock_stale:
         raise ValueError("存在写入锁；确认原写作进程已经结束，再显式指定 --unlock-stale")
+    if lock.exists():
+        _assert_lock_owner_stopped(lock)
     payload = read_json(marker)
     if (not isinstance(payload, dict) or payload.get("schema_version") != 1
             or payload.get("section_id") != sid

@@ -77,8 +77,10 @@ class SyntheticBidPipelineTests(unittest.TestCase):
         self.assertNotIn("虚构的未批准人员", prompt)
         self.assertEqual(payload["facts"][0]["value"], "30日")
         rid = payload["requirements"][0]["id"]
+        marker = {"S1": "【实施组织唯一标记A101】", "S2": "【质量保障唯一标记B202】"}[payload["section_id"]]
         return json.dumps({
             "body": (
+                marker +
                 "按照项目评分要求，采用负责人统筹、工作组执行、质量人员复核的工作机制。"
                 "项目工期为30日，按照任务节点安排实施检查，并记录问题、整改过程和交付资料。"
                 "所有岗位安排以最终审核的人力配置为准，未经确认不写入具体人员名单。"
@@ -109,10 +111,15 @@ class SyntheticBidPipelineTests(unittest.TestCase):
                                   "--output", str(self.review)), 0)
         review = read_json(self.review)
         self.assertEqual([x["decision"] for x in review["decisions"]], ["pending", "pending"])
+        # A rejected pending-review import must be byte-for-byte read-only.
+        tracked = ("project.json", "requirements.json", "facts.json", "outline.json")
+        before_rejection = {name: (self.project / name).read_bytes() for name in tracked}
         self.assertEqual(self.cli("review-import", str(self.project),
                                   "--suggestions", str(self.candidates),
                                   "--review", str(self.review),
                                   *self.source_args(), "--apply"), 2)
+        self.assertEqual({name: (self.project / name).read_bytes() for name in tracked},
+                         before_rejection)
         for decision in review["decisions"]:
             decision["decision"] = "accept"
         review["acknowledgement"] = ACKNOWLEDGEMENT
@@ -195,6 +202,21 @@ class SyntheticBidPipelineTests(unittest.TestCase):
         full_text = "\n".join(p.text for p in doc.paragraphs)
         self.assertIn("项目工期为30日", full_text)
         self.assertNotIn(BANNER, full_text)
+        # Verify that neither chapter was silently dropped or duplicated.
+        chapter_texts = {}
+        current_heading = None
+        for paragraph in doc.paragraphs:
+            if paragraph.style.name.startswith("Heading"):
+                current_heading = paragraph.text
+                chapter_texts.setdefault(current_heading, [])
+            elif current_heading is not None:
+                chapter_texts[current_heading].append(paragraph.text)
+        first = "\n".join(chapter_texts["实施组织方案"])
+        second = "\n".join(chapter_texts["质量保障措施"])
+        self.assertEqual(first.count("【实施组织唯一标记A101】"), 1)
+        self.assertNotIn("【质量保障唯一标记B202】", first)
+        self.assertEqual(second.count("【质量保障唯一标记B202】"), 1)
+        self.assertNotIn("【实施组织唯一标记A101】", second)
         self.assertEqual(len([c for c in self.model_calls if c[0] == "write"]), 2)
 
     def test_e2e_response_trace_review_gate_and_current_paragraph_locations(self):
@@ -291,7 +313,20 @@ class SyntheticBidPipelineTests(unittest.TestCase):
         self.assertEqual(self.cli("consistency-audit", str(self.project),
                                   "--output", str(conflicts)), 1)
         self.assertGreater(read_json(conflicts)["statistics"]["errors"], 0)
-        self.assertEqual(self.cli("audit", str(self.project), *self.source_args()), 1)
+        self.assertIn("cross_section_conflict",
+                      [item["code"] for item in read_json(conflicts)["findings"]])
+        # check is warning-only for semantic conflicts; strict audit
+        # must reject specifically for consistency, not just stale approval.
+        warning_report = self.root / "conflict-check.json"
+        self.assertEqual(self.cli("check", str(self.project), *self.source_args(),
+                                  "--output", str(warning_report)), 0)
+        self.assertTrue(any("cross_section_conflict" in warning
+                            for warning in read_json(warning_report)["warnings"]))
+        strict_report = self.root / "conflict-audit.json"
+        self.assertEqual(self.cli("audit", str(self.project), *self.source_args(),
+                                  "--output", str(strict_report)), 1)
+        self.assertTrue(any("跨章节承诺[cross_section_conflict]" in error
+                            for error in read_json(strict_report)["errors"]))
         self.assertNotEqual(self.cli("export", str(self.project), *self.source_args(),
                                      "--output", str(self.outfile)), 0)
         self.assertFalse(self.outfile.exists())
