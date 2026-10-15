@@ -114,7 +114,7 @@ def analyze_consistency(root: Path, state: dict | None = None) -> dict:
             if in_code or not trimmed or trimmed.startswith((">", "#", "|")):
                 continue
             # Inline Markdown emphasis is not a change of contractual meaning.
-            visible = re.sub(r"\\*\\*|__", "", line)
+            visible = re.sub(r"\*\*|__", "", line)
             # Inline quoted history/examples aren't the current bidder's promise.
             visible = re.sub(r"“[^”]*”|「[^」]*」|‘[^’]*’", "", visible)
             for match in _STATEMENT.finditer(visible):
