@@ -13,6 +13,7 @@ from .evidence import verify_evidence
 from .extraction import extract_document
 from .outline_tree import walk_outline
 from .score_candidates import _source_index
+from .section_transaction import stage, stage_path
 
 BANNER = "> AI生成草稿（待人工审查）"
 CONFIRM = "我已逐项核对本节事实、招标响应和承诺，并批准该正文"
@@ -150,6 +151,8 @@ def write_section(root: Path, section_id: str, index_paths: list[Path], source_d
     except FileExistsError as exc:
         raise ValueError(f"章节 {section_id} 已有写入锁，可能正在执行") from exc
     try:
+        if stage_path(root, section_id).exists():
+            raise ValueError("上一轮章节写作中断，必须先执行 section-recover")
         if _content_status(destination, section) == "existing":
             return {"section_id": section_id, "status": "skipped_existing"}
         structure = inspect(root)
@@ -186,7 +189,7 @@ def write_section(root: Path, section_id: str, index_paths: list[Path], source_d
             raise ValueError("生成期间正文被更改，拒绝覆盖人工内容")
         markdown = f"# {section['title']}\n\n{BANNER}\n\n{body}\n"
         checkpoint = checkpoint_path(root, section_id)
-        write_json(checkpoint, {
+        metadata = {
             "schema_version": 1, "section_id": section_id,
             "status": "pending_review", "body_sha256": _digest(markdown.encode("utf-8")),
             "model": model.strip(), "requirement_ids": sorted(req_ids),
@@ -197,16 +200,29 @@ def write_section(root: Path, section_id: str, index_paths: list[Path], source_d
                 for name, idx in sorted(sources.items())
             ],
             "note": "AI 草稿必须经过人工逐项审核，不能视为正式投标内容",
-        })
+        }
+        mark_bytes = markdown.encode("utf-8")
+        checkpoint_bytes = (json.dumps(metadata, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+        journal = stage(root, section_id, mark_bytes, checkpoint_bytes)
+        # The marker is durable before either file changes. A mid-write crash
+        # blocks audit and must be resolved by an explicit reviewed rollback.
+        write_json(checkpoint, metadata)
         if destination.exists():
-            destination.write_text(markdown, encoding="utf-8")
+            from .review_transaction import _atomic_bytes
+            _atomic_bytes(destination, mark_bytes)
         else:
-            with destination.open("x", encoding="utf-8") as stream:
-                stream.write(markdown)
+            with destination.open("xb") as stream:
+                stream.write(mark_bytes)
+                stream.flush()
+                os.fsync(stream.fileno())
+        if destination.read_bytes() != mark_bytes or checkpoint.read_bytes() != checkpoint_bytes:
+            raise OSError("章节生成文件写入后校验失败，保留恢复日志")
+        journal.unlink()
         return {"section_id": section_id, "status": "pending_review",
                 "checkpoint": str(checkpoint)}
     except Exception as exc:
-        if _content_status(destination, section) in {"missing", "placeholder"}:
+        if (not stage_path(root, section_id).exists()
+                and _content_status(destination, section) in {"missing", "placeholder"}):
             write_json(checkpoint_path(root, section_id), {
                 "schema_version": 1, "section_id": section_id,
                 "status": "failed", "error_type": type(exc).__name__,
@@ -223,6 +239,8 @@ def approve_section(root: Path, section_id: str, *, acknowledgement: str) -> dic
     if acknowledgement != CONFIRM:
         raise ValueError("未明确确认当前章节已经逐项审核")
     checkpoint = checkpoint_path(root, section_id)
+    if stage_path(root, section_id).exists():
+        raise ValueError("章节写作事务未完成，禁止批准；请先执行 section-recover")
     if not checkpoint.is_file() or not dest.is_file():
         raise ValueError("没有可审批的 AI 章节或检查点")
     meta = json.loads(checkpoint.read_text(encoding="utf-8"))
