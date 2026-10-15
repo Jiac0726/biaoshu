@@ -52,6 +52,96 @@ class ReviewedImportTests(unittest.TestCase):
         return reviewed_import(self.project, self.suggestions, self.review_path,
                                [self.index_path], self.sources, apply=apply)
 
+    def set_ambiguous_only(self):
+        phrase = "质量保障措施：合格得5分，优秀得10分"
+        self.original.write_text("技术评分\n" + phrase + "\n", encoding="utf-8")
+        write_json(self.index_path, extract_document(self.original).index)
+        write_json(self.suggestions, {
+            "schema_version": 1, "status": "suggestions_only", "candidates": [],
+            "ambiguous_candidates": [{
+                "id": "M1", "status": "requires_manual_scoring_review",
+                "score_options": [5, 10], "reason": "multiple_scoring_tiers",
+                "evidence": {"file": "tender.txt", "location": "第2行", "quote": phrase},
+            }],
+        })
+        write_json(self.review_path, review_template(self.suggestions))
+
+    def test_multitier_is_not_silently_skipped_by_review_import(self):
+        self.set_ambiguous_only()
+        template = read_json(self.review_path)
+        self.assertEqual(template["decisions"], [])
+        self.assertEqual(template["ambiguous_decisions"], [
+            {"id": "M1", "decision": "pending", "reason": ""},
+        ])
+        self.assertEqual(self.run_import()["status"], "pending_review")
+        with self.assertRaisesRegex(ValueError, "未处理"):
+            self.run_import(apply=True)
+        self.assertEqual(read_json(self.project / "requirements.json")["requirements"], [])
+
+    def test_multitier_requires_explicit_reason_to_exclude(self):
+        self.set_ambiguous_only()
+        rev = read_json(self.review_path)
+        rev["acknowledgement"] = ACKNOWLEDGEMENT
+        rev["ambiguous_decisions"][0]["decision"] = "not_applicable"
+        write_json(self.review_path, rev)
+        with self.assertRaisesRegex(ValueError, "审核理由"):
+            self.run_import(apply=True)
+        rev["ambiguous_decisions"][0]["reason"] = "已经逐条确认本行不是适用的技术评分要求"
+        write_json(self.review_path, rev)
+        self.assertEqual(self.run_import(apply=True)["statistics"]["ambiguous_pending"], 0)
+
+    def test_multitier_manual_registration_requires_real_existing_evidence(self):
+        self.set_ambiguous_only()
+        rev = read_json(self.review_path)
+        rev["acknowledgement"] = ACKNOWLEDGEMENT
+        rev["ambiguous_decisions"][0].update({
+            "decision": "manually_registered", "reason": "评分分档经过审查，已按原文完整手工登记",
+        })
+        write_json(self.review_path, rev)
+        with self.assertRaisesRegex(ValueError, "项目需求不存在对应原文"):
+            self.run_import(apply=True)
+        ev = read_json(self.suggestions)["ambiguous_candidates"][0]["evidence"]
+        write_json(self.project / "requirements.json", {"requirements": [{
+            "id": "R1", "title": "人工登记的两档评分", "score": None,
+            "evidence": ev, "response_sections": ["S1"],
+        }]})
+        write_json(self.project / "outline.json", {"sections": [{
+            "id": "S1", "title": "质量保障响应", "requirement_ids": ["R1"],
+            "weight": 1.0, "target_words": 0,
+        }]})
+        result = self.run_import(apply=True)
+        self.assertEqual(result["statistics"]["ambiguous_manually_registered"], 1)
+        self.assertEqual(result["statistics"]["new_requirements"], 0)
+
+    def test_multitier_review_must_have_one_decision_per_source_entry(self):
+        self.set_ambiguous_only()
+        rev = read_json(self.review_path)
+        del rev["ambiguous_decisions"]
+        write_json(self.review_path, rev)
+        with self.assertRaisesRegex(ValueError, "多档评分必须逐项审核"):
+            self.run_import(apply=True)
+        rev["ambiguous_decisions"] = [
+            {"id": "FAKE", "decision": "not_applicable", "reason": "这个无效ID不允许替代原始评分项目"}
+        ]
+        write_json(self.review_path, rev)
+        with self.assertRaisesRegex(ValueError, "多档评分必须逐项审核"):
+            self.run_import(apply=True)
+
+    def test_multitier_must_have_source_matched_to_original(self):
+        self.set_ambiguous_only()
+        candidate = read_json(self.suggestions)
+        candidate["ambiguous_candidates"][0]["evidence"]["quote"] = "从未出现在来源招标文件中的虚构分档要求"
+        write_json(self.suggestions, candidate)
+        write_json(self.review_path, review_template(self.suggestions))
+        rev = read_json(self.review_path)
+        rev["acknowledgement"] = ACKNOWLEDGEMENT
+        rev["ambiguous_decisions"][0].update({
+            "decision": "not_applicable", "reason": "查证了该项来源，应予人工明确排除",
+        })
+        write_json(self.review_path, rev)
+        with self.assertRaisesRegex(ValueError, "多档评分来源"):
+            self.run_import(apply=True)
+
     def test_template_requires_review(self):
         template = read_json(self.review_path)
         self.assertEqual(template["decisions"],
