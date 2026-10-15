@@ -210,7 +210,10 @@ def reviewed_import(project_dir: Path, suggestions_path: Path, review_path: Path
     sec_after = {"sections": [*sections, *new_sections]}
     # All validation and preview occur before modifying either file.
     # Keep local backups for independent recovery if interrupted mid-write.
-    backup = project_dir / "reports" / "review-backups" / _digest(suggestions_path)
+    # A later review may accept previously rejected items in the same suggestion set.
+    # Include the review snapshot so backups remain distinct for each decision set.
+    review_stamp = _digest(review_path)
+    backup = project_dir / "reports" / "review-backups" / (_digest(suggestions_path) + "-" + review_stamp)
     if backup.exists():
         raise ValueError("该候选文件的审核备份已经存在；请人工检查重复导入或恢复记录")
     backup.mkdir(parents=True, exist_ok=False)
