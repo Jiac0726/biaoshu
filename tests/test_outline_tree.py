@@ -115,6 +115,30 @@ class OutlineHierarchyTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "一级目录已锁定"):
             outline_plan(self.root, self.proposal, apply=True)
 
+    def test_locked_first_level_direct_leaf_title_is_protected(self):
+        # The root S3 heading is rendered as Heading 1, not a group label.
+        self.proposed(self.grouped())
+        outline_plan(self.root, self.proposal, apply=True)
+        lock_outline(self.root, confirm=True)
+        original = read_json(self.root / "outline.json")
+        original["sections"][2]["title"] = "被未经批准修改的一级标题"
+        write_json(self.root / "outline.json", original)
+        review = inspect(self.root)
+        self.assertFalse(review["ok"])
+        self.assertTrue(any("一级目录" in e for e in review["errors"]))
+
+    def test_legacy_root_leaf_lock_requires_refresh_not_silent_unlock(self):
+        self.proposed(self.grouped())
+        outline_plan(self.root, self.proposal, apply=True)
+        lock_outline(self.root, confirm=True)
+        lock_file = self.root / "outline-lock.json"
+        legacy = read_json(lock_file)
+        legacy["root_signature"][-1].pop("title")
+        from biaoshu.outline_tree import _hash
+        legacy["sha256"] = _hash(legacy["root_signature"])
+        write_json(lock_file, legacy)
+        self.assertFalse(inspect(self.root)["ok"])
+
     def test_lock_allows_lower_level_order_change(self):
         self.proposed(self.grouped())
         outline_plan(self.root, self.proposal, apply=True)
