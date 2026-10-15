@@ -102,7 +102,7 @@ def _request_model(endpoint: str, model: str, prompt: str, *,
     # A JSON-looking prefix is not a completed model response. Some local
     # backends return truncated or tool-bound content that parses as JSON.
     # In particular, 'length', null/missing and tool_calls cannot be approved.
-    if finish_reason not in {"stop", "eos_token"}:
+    if not isinstance(finish_reason, str) or finish_reason not in {"stop", "eos_token"}:
         raise ValueError("模型响应未正常完成（finish_reason 非 stop/eos_token），已拒绝截断或工具调用结果")
     if not isinstance(content, str):
         raise ValueError("模型未返回文本 JSON")
