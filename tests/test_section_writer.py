@@ -304,6 +304,121 @@ class SectionWriterTests(unittest.TestCase):
         self.assertFalse(lock.exists())
         self.assertFalse(stage_path(self.project, "S1").exists())
 
+    def test_failed_generation_then_manual_completion_can_be_registered(self):
+        from biaoshu.section_writer import accept_manual_section
+        doc = self.project / "sections" / "S1.md"
+        def fail(*args, **kwargs):
+            raise RuntimeError("synthetic model outage")
+        with self.assertRaisesRegex(RuntimeError, "synthetic model outage"):
+            write_section(self.project, "S1", [self.index], self.source_dir,
+                          model="local-demo", transport=fail)
+        self.assertEqual(read_json(checkpoint_path(self.project, "S1"))["status"], "failed")
+        doc.write_text("# 实施组织\n\n人工撰写：明确组织机制、负责人职责、质量复核程序、全过程记录和招标要求的实施步骤。\n",
+                       encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "--confirm"):
+            accept_manual_section(self.project, "S1")
+        outcome = accept_manual_section(self.project, "S1", confirm=True)
+        self.assertEqual(outcome["status"], "manual_content_registered")
+        self.assertTrue(Path(outcome["archive"]).is_file())
+        self.assertFalse(checkpoint_path(self.project, "S1").exists())
+        self.assertEqual(self.one()["status"], "skipped_existing")
+        self.one("S2")
+        approve_section(self.project, "S2", acknowledgement=CONFIRM)
+        self.assertTrue(inspect(self.project, strict=True)["ok"])
+
+    def test_manual_takeover_refuses_pending_ai_draft(self):
+        from biaoshu.section_writer import accept_manual_section
+        self.one()
+        with self.assertRaisesRegex(ValueError, "只有生成失败"):
+            accept_manual_section(self.project, "S1", confirm=True)
+        self.assertEqual(read_json(checkpoint_path(self.project, "S1"))["status"], "pending_review")
+
+    def test_manual_takeover_refuses_banner_even_with_failed_sidecar(self):
+        from biaoshu.section_writer import accept_manual_section
+        self.one()
+        checkpoint = checkpoint_path(self.project, "S1")
+        write_json(checkpoint, {"schema_version": 1, "section_id": "S1",
+                                "status": "failed", "error_type": "RuntimeError"})
+        with self.assertRaisesRegex(ValueError, "待审标记"):
+            accept_manual_section(self.project, "S1", confirm=True)
+        self.assertEqual(read_json(checkpoint)["status"], "failed")
+        self.assertFalse(list(checkpoint.parent.glob("archive/*.json")))
+
+    def test_approval_interruption_is_journaled_and_explicitly_rolled_back(self):
+        from biaoshu.section_transaction import stage_path, recover
+        from biaoshu import review_transaction
+        self.one()
+        doc = self.project / "sections" / "S1.md"
+        sidecar = checkpoint_path(self.project, "S1")
+        before_doc, before_meta = doc.read_bytes(), sidecar.read_bytes()
+        atomic = review_transaction._atomic_bytes
+        def fail_second(dest, raw):
+            if dest == sidecar:
+                raise OSError("simulated checkpoint commit failure")
+            return atomic(dest, raw)
+        with patch.object(review_transaction, "_atomic_bytes", side_effect=fail_second):
+            with self.assertRaisesRegex(OSError, "simulated checkpoint commit failure"):
+                approve_section(self.project, "S1", acknowledgement=CONFIRM)
+        self.assertTrue(stage_path(self.project, "S1").exists())
+        self.assertEqual(read_json(stage_path(self.project, "S1"))["status"], "approving")
+        self.assertNotEqual(doc.read_bytes(), before_doc)
+        self.assertEqual(sidecar.read_bytes(), before_meta)
+        self.assertFalse(inspect(self.project, strict=True)["ok"])
+        with self.assertRaisesRegex(ValueError, "section-recover"):
+            approve_section(self.project, "S1", acknowledgement=CONFIRM)
+        with self.assertRaisesRegex(ValueError, "--confirm"):
+            recover(self.project, "S1")
+        self.assertEqual(recover(self.project, "S1", confirm=True)["status"], "restored")
+        self.assertEqual(doc.read_bytes(), before_doc)
+        self.assertEqual(sidecar.read_bytes(), before_meta)
+        self.assertFalse(stage_path(self.project, "S1").exists())
+        self.assertEqual(approve_section(self.project, "S1", acknowledgement=CONFIRM)["status"],
+                         "approved")
+
+    def test_approval_refuses_manual_edits_after_partial_commit(self):
+        from biaoshu.section_transaction import recover, stage_path
+        from biaoshu import review_transaction
+        self.one()
+        doc = self.project / "sections" / "S1.md"
+        original = review_transaction._atomic_bytes
+        def fail_second(dest, raw):
+            if dest.name == "S1.json":
+                raise OSError("injected failure")
+            return original(dest, raw)
+        with patch.object(review_transaction, "_atomic_bytes", side_effect=fail_second):
+            with self.assertRaises(OSError):
+                approve_section(self.project, "S1", acknowledgement=CONFIRM)
+        doc.write_text(doc.read_text(encoding="utf-8") + "\n人工又追加一条未经复核的承诺",
+                       encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "人工修改"):
+            recover(self.project, "S1", confirm=True)
+        self.assertTrue(stage_path(self.project, "S1").exists())
+
+    def test_orphan_section_write_lock_can_be_cleared_only_explicitly(self):
+        import os
+        from biaoshu.section_transaction import recover
+        folder = self.project / "reports" / "section-writing"
+        folder.mkdir(exist_ok=True)
+        lock = folder / "S1.write.lock"
+        lock.write_text(json.dumps({"pid": 987654321, "status": "writing"}),
+                        encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "--unlock-stale"):
+            recover(self.project, "S1", confirm=True)
+        self.assertTrue(lock.exists())
+        result = recover(self.project, "S1", confirm=True, unlock_stale=True)
+        self.assertEqual(result["status"], "stale_lock_cleared")
+        self.assertFalse(lock.exists())
+        lock.write_text(json.dumps({"pid": os.getpid(), "status": "writing"}),
+                        encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "仍然存活"):
+            recover(self.project, "S1", confirm=True, unlock_stale=True)
+        self.assertTrue(lock.exists())
+
+    def test_recovery_rejects_malformed_section_identity(self):
+        from biaoshu.section_transaction import recover
+        with self.assertRaisesRegex(ValueError, "不合法的小节 ID"):
+            recover(self.project, "../outside", confirm=True, unlock_stale=True)
+
     def test_unapproved_reapproval_cannot_rebind_edited_approved_body(self):
         self.one()
         approve_section(self.project, "S1", acknowledgement=CONFIRM)
