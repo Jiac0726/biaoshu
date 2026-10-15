@@ -90,6 +90,7 @@ function render() {
   renderReview(data);
   renderOutline(data);
   renderSections(data);
+  renderTrace(data);
   renderAudit(data);
   renderDownloads(data);
 }
@@ -191,6 +192,47 @@ function renderSections(data) {
   document.querySelectorAll("[data-approve]").forEach((node) =>
     node.addEventListener("click", () => action("approve", {section:node.dataset.approve})));
 }
+function renderTrace(data) {
+  const trace=data.trace;
+  if(!trace){$("traceArea").innerHTML='<p class="hint">尚未建立追溯台账。需要正式检查每项技术要求在正文的位置时，先点击“创建响应追溯台账”。</p>';return;}
+  const rows=(trace.items||[]).map((item,i)=>
+    '<div class="trace-row" data-trace-index="' + i + '"><div><strong>'+esc(item.requirement_id)+' → '+esc(item.section_id)+
+    '</strong><span class="candidate-sub">请从上方章节正文中找到实际响应原句，并记录其在 .md 文件中的行号（从 1 起）</span></div>'+
+    '<label>行号<input class="trace-line" type="number" min="1" value="'+esc(item.line==null?"":item.line)+'"></label>'+
+    '<label>响应原句<input class="trace-quote" value="'+esc(item.quote||"")+'" placeholder="复制正文指定行的连续原句，至少12字"></label>'+
+    '<label>审核决定<select class="trace-decision">'+
+    option("pending",item.decision,"待审")+option("confirmed",item.decision,"人工确认")+
+    '</select></label></div>'
+  ).join("");
+  $("traceArea").innerHTML='<div class="mini-heading">逐条响应段落位置（共 '+(trace.items||[]).length+' 项）</div>'+
+    rows+'<label class="review-confirm"><input type="checkbox" id="traceConfirmed" '+
+    (trace.acknowledgement?'checked':'')+'>我已经逐项比对招标评分要求和章节正文，确认以上段落位置确实为对应响应。不得由 AI 代为勾选。</label>';
+}
+async function saveTrace() {
+  if(working||!snapshot||!snapshot.trace)return notify("请先创建追溯台账",true);
+  const items=[];
+  let error="";
+  document.querySelectorAll(".trace-row").forEach((row)=>{
+    const i=Number(row.dataset.traceIndex);
+    const item=snapshot.trace.items[i];
+    const value=row.querySelector(".trace-line").value.trim();
+    const line=value===""?null:Number(value);
+    if(value!==""&&(!Number.isInteger(line)||line<=0))error="响应行号必须是正整数";
+    items.push({requirement_id:item.requirement_id,section_id:item.section_id,
+      line:line,quote:row.querySelector(".trace-quote").value,
+      decision:row.querySelector(".trace-decision").value});
+  });
+  if(error)return notify(error,true);
+  loading(true);
+  try{
+    const result=await post("/api/action?"+params({id:projectId}),{
+      action:"trace-save",items,confirmed:$("traceConfirmed")&&$("traceConfirmed").checked});
+    await refresh();
+    notify(result.message);
+  }catch(err){notify(err.message,true);}
+  finally{loading(false);}
+}
+
 function renderAudit(data) {
   const audit = data.audit;
   if (!audit) {
@@ -301,6 +343,7 @@ document.addEventListener("DOMContentLoaded", () => {
   $("uploadBtn").addEventListener("click",uploadFiles);
   $("reviewSave").addEventListener("click",saveReview);
   $("outlineSave").addEventListener("click",saveOutline);
+  $("traceSave").addEventListener("click",saveTrace);
   document.querySelectorAll("[data-action]").forEach((node) =>
     node.addEventListener("click", () => action(node.dataset.action)));
   bootstrap().catch((err) => notify("本地服务连接失败：" + err.message,true));
