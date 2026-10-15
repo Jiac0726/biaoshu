@@ -11,6 +11,7 @@ from .quality_gate import inspect_with_evidence
 from .extraction import extract_document
 from .score_candidates import discover_score_candidates
 from .ai_tender_analysis import analyze_tender
+from .review_import import review_template, reviewed_import
 
 
 def extract_source(source: Path) -> str:
@@ -112,6 +113,18 @@ def main(argv=None):
                         help="模型请求超时秒数（1-600）")
     ai_cmd.add_argument("--output", type=Path, required=True,
                         help="写入待人工确认建议 JSON，永不覆盖正式 requirements.json")
+    reviewer = sub.add_parser("review-init", help="为 AI/规则候选创建人工审批清单")
+    reviewer.add_argument("--suggestions", required=True, type=Path)
+    reviewer.add_argument("--output", required=True, type=Path)
+    importer = sub.add_parser("review-import", help="预览或登记明确核准的技术需求与一一响应章节")
+    importer.add_argument("project_dir", type=Path)
+    importer.add_argument("--suggestions", required=True, type=Path)
+    importer.add_argument("--review", required=True, type=Path)
+    importer.add_argument("--index", required=True, action="append", type=Path)
+    importer.add_argument("--source-dir", required=True, type=Path)
+    importer.add_argument("--apply", action="store_true",
+                          help="经人工逐项审查并填写 acknowledgement 后才实际写入")
+    importer.add_argument("--output", type=Path, help="可选预览/导入报告 JSON")
     args = parser.parse_args(argv)
     try:
         if args.command == "init":
@@ -124,6 +137,22 @@ def main(argv=None):
             index_path = args.output.with_suffix(".index.json")
             write_json(index_path, extracted.index)
             print(f"已提取：{args.output}；证据索引：{index_path}。请人工核对缺失文本和提取警告。")
+        elif args.command == "review-init":
+            if args.output.exists():
+                raise ValueError("审核清单已存在，禁止覆盖人工审核结果；请使用新的输出路径")
+            template = review_template(args.suggestions)
+            write_json(args.output, template)
+            print(f"审核清单：{args.output}，共 {len(template['decisions'])} 项；请逐项填 accept/reject。")
+        elif args.command == "review-import":
+            plan = reviewed_import(args.project_dir, args.suggestions, args.review,
+                                   args.index, args.source_dir, apply=args.apply)
+            if args.output:
+                write_json(args.output, plan)
+            print(f"{'已登记' if args.apply else '仅预览'}：新增 {plan['statistics']['new_requirements']} 条，"
+                  f"拒绝 {plan['statistics']['rejected']} 条，"
+                  f"待审 {plan['statistics']['pending']} 条，"
+                  f"重复 {plan['statistics']['duplicate']} 条。"
+                  + (f"备份：{plan.get('backup_dir')}" if plan.get('backup_dir') else ""))
         elif args.command == "analyze-ai":
             result = analyze_tender(args.index, args.source_dir, model=args.model,
                                     endpoint=args.endpoint, allow_remote=args.allow_remote,
