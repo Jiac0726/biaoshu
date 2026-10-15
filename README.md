@@ -105,3 +105,17 @@ python -m biaoshu score-candidates --index ./workspaces/my-bid/tender-extracted.
 ```
 
 索引可通过多次 `--index` 传入，`--source-dir` 必须包含未修改的原始招标文件。每条候选均含原文定位和逐字引用，并标记 `pending_review`。结果的顶层 `status=suggestions_only`，**不会写入 requirements.json**。该工具是保守的规则筛查：对无显式分值、综合分档与复杂表格会漏检；必须由 Agent/人工审查原文，区分技术评分大项与评分规则、商务/报价因素，并补全遗漏后才能形成正式需求。
+
+
+## 本地 AI 招标分析（待人工确认）
+
+需先执行 `extract` 生成原文索引；本功能使用 OpenAI 兼容的本地推理服务（例如 Ollama），**不自动访问云端模型，也不自动修改正式 requirements.json**。
+
+```bash
+# 先在本机独立运行模型服务器，并确认所指定模型已经安装
+python -m biaoshu analyze-ai --index ./workspaces/my-bid/tender-extracted.index.json --source-dir ./sources --model YOUR_LOCAL_MODEL --output ./workspaces/my-bid/reports/ai-suggestions.json
+```
+
+默认接口是 `http://127.0.0.1:11434/v1`。可用 `--endpoint` 指定另一个 OpenAI 兼容 base URL。为防止机密外传，非本地地址默认被拒绝；仅在确认招标资料及模型服务的授权与隐私政策后，才显式添加 `--allow-remote`，并可通过 `--api-key-env VARIABLE_NAME` 从环境变量读取密钥，切勿把密钥写入命令或仓库。
+
+分析时采用有限长度的来源文本块，输出的 `file/location/quote` 要逐条与实际提供给模型的证据块匹配；原文件改变、生成的引文不符、模型输出非法 JSON 时直接报错，不写正式需求。多份文件重复使用 `--index`。对跳过的块、评分分档、遗漏评分项、实质性条款及法律合规要求，仍须通读原文和人工审稿。输出仅是 `suggestions_only`。
