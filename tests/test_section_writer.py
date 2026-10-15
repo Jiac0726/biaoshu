@@ -210,7 +210,7 @@ class SectionWriterTests(unittest.TestCase):
             self.one()
         with self.assertRaisesRegex(ValueError, "事务未完成"):
             approve_section(self.project, "S1", acknowledgement=CONFIRM)
-        with self.assertRaisesRegex(ValueError, "确认"):
+        with self.assertRaisesRegex(ValueError, "--confirm"):
             recover(self.project, "S1")
         result = recover(self.project, "S1", confirm=True)
         self.assertEqual(result["status"], "restored")
