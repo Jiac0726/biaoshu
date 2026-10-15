@@ -16,6 +16,7 @@ from .review_transaction import recover as recover_review
 from .outline_tree import (outline_template, outline_plan, lock_outline,
                            walk_outline, validate_outline_state)
 from .section_writer import write_sections, approve_section
+from .section_transaction import recover as recover_section
 from .consistency import analyze_consistency
 from .response_trace import create_trace, audit_trace
 from .semantic_review import review_responses
@@ -188,6 +189,12 @@ def main(argv=None):
     recovery = sub.add_parser("review-recover", help="中断的审核导入按事务备份恢复，绝不合并未知外部改动")
     recovery.add_argument("project_dir", type=Path)
     recovery.add_argument("--confirm", action="store_true")
+    recover_chapter = sub.add_parser("section-recover", help="人工确认后恢复中断的章节写入；拒绝覆盖未知修改")
+    recover_chapter.add_argument("project_dir", type=Path)
+    recover_chapter.add_argument("--section", required=True)
+    recover_chapter.add_argument("--confirm", action="store_true")
+    recover_chapter.add_argument("--unlock-stale", action="store_true",
+                                 help="只在确认原写作进程已停止时解除残留锁")
     args = parser.parse_args(argv)
     try:
         if args.command == "init":
@@ -246,6 +253,10 @@ def main(argv=None):
             for item in report["outcomes"]:
                 print(f"章节 {item['section_id']}：{item['status']}")
             print(f"本轮处理 {report['completed']} 节。AI 新内容待人工审查；保留既有章节。")
+        elif args.command == "section-recover":
+            result = recover_section(args.project_dir, args.section,
+                                     confirm=args.confirm, unlock_stale=args.unlock_stale)
+            print(f"章节 {result['section_id']} 已回退至本次 AI 写入前状态，可重新运行写作。")
         elif args.command == "approve-section":
             result = approve_section(args.project_dir, args.section,
                                      acknowledgement=args.acknowledgement)
