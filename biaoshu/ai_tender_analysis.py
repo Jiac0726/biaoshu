@@ -94,9 +94,16 @@ def _request_model(endpoint: str, model: str, prompt: str, *,
         raise ValueError("模型响应超过 2 MiB，已拒绝处理")
     try:
         response_json = json.loads(data)
-        content = response_json["choices"][0]["message"]["content"]
+        choice = response_json["choices"][0]
+        content = choice["message"]["content"]
+        finish_reason = choice["finish_reason"]
     except (ValueError, KeyError, IndexError, TypeError) as exc:
         raise ValueError(f"模型接口未返回兼容的 chat completion JSON：{type(exc).__name__}") from exc
+    # A JSON-looking prefix is not a completed model response. Some local
+    # backends return truncated or tool-bound content that parses as JSON.
+    # In particular, 'length', null/missing and tool_calls cannot be approved.
+    if not isinstance(finish_reason, str) or finish_reason not in {"stop", "eos_token"}:
+        raise ValueError("模型响应未正常完成（finish_reason 非 stop/eos_token），已拒绝截断或工具调用结果")
     if not isinstance(content, str):
         raise ValueError("模型未返回文本 JSON")
     return content

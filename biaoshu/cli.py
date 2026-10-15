@@ -20,6 +20,7 @@ from .section_transaction import recover as recover_section
 from .consistency import analyze_consistency
 from .response_trace import create_trace, audit_trace
 from .semantic_review import review_responses
+from .safe_report import write_new_report, validate_new_report_target
 
 
 def extract_source(source: Path) -> str:
@@ -197,6 +198,11 @@ def main(argv=None):
                                  help="只在确认原写作进程已停止时解除残留锁")
     args = parser.parse_args(argv)
     try:
+        if args.command in ("semantic-review", "analyze-ai", "score-candidates",
+                            "review-init", "outline-init"):
+            # Fail before model calls, and use atomic exclusive publishing
+            # after the model returns to close the check/write race.
+            validate_new_report_target(args.output)
         if args.command == "init":
             initialize(args.project_dir)
             print(f"已初始化：{args.project_dir}")
@@ -208,14 +214,12 @@ def main(argv=None):
             write_json(index_path, extracted.index)
             print(f"已提取：{args.output}；证据索引：{index_path}。请人工核对缺失文本和提取警告。")
         elif args.command == "semantic-review":
-            if args.output.exists():
-                raise ValueError("AI 语义审稿报告已存在，禁止覆盖先前审稿记录")
             result = review_responses(
                 args.project_dir, args.index, args.source_dir,
                 model=args.model, endpoint=args.endpoint,
                 allow_remote=args.allow_remote, api_key_env=args.api_key_env,
                 timeout=args.timeout)
-            write_json(args.output, result)
+            write_new_report(args.output, result)
             print(f"已生成 AI 逐项语义审稿建议 {result['statistics']['examined_links']} 项；"
                   f"潜在问题 {result['statistics']['potential_issues']} 项；"
                   f"结果 {args.output}。全部待人工复核，不影响正式批准。")
@@ -262,10 +266,8 @@ def main(argv=None):
                                      acknowledgement=args.acknowledgement)
             print(f"章节 {result['section_id']}：已由操作者声明审核通过；仍需全篇终审。")
         elif args.command == "outline-init":
-            if args.output.exists():
-                raise ValueError("目录候选文件已存在，禁止覆盖，请指定新路径")
             candidate = outline_template(args.project_dir)
-            write_json(args.output, candidate)
+            write_new_report(args.output, candidate)
             print(f"层级目录候选已生成：{args.output}。需要人工核实并编辑 roots 后才能应用。")
         elif args.command == "outline-plan":
             report = outline_plan(args.project_dir, args.proposal, apply=args.apply)
@@ -278,10 +280,8 @@ def main(argv=None):
             result = lock_outline(args.project_dir, confirm=args.confirm)
             print(f"一级目录锁：{result['status']}，指纹：{result['sha256']}")
         elif args.command == "review-init":
-            if args.output.exists():
-                raise ValueError("审核清单已存在，禁止覆盖人工审核结果；请使用新的输出路径")
             template = review_template(args.suggestions)
-            write_json(args.output, template)
+            write_new_report(args.output, template)
             multi = len(template.get("ambiguous_decisions", []))
             print(f"审核清单：{args.output}；确定性候选 {len(template['decisions'])} 项"
                   f"，多档评分需逐项审查 {multi} 项。多档项目不得自动采用单一分值。")
@@ -304,13 +304,13 @@ def main(argv=None):
             result = analyze_tender(args.index, args.source_dir, model=args.model,
                                     endpoint=args.endpoint, allow_remote=args.allow_remote,
                                     api_key_env=args.api_key_env, timeout=args.timeout)
-            write_json(args.output, result)
+            write_new_report(args.output, result)
             print(f"AI 分析建议 {len(result['candidates'])} 项；"
                   f"选用证据块 {result['statistics']['selected_blocks']} 个；"
                   f"已保存 {args.output}。必须人工复核，不自动修改正式需求。")
         elif args.command == "score-candidates":
             result = discover_score_candidates(args.index, args.source_dir)
-            write_json(args.output, result)
+            write_new_report(args.output, result)
             print(f"技术评分候选 {len(result['candidates'])} 条；歧义行 "
                   f"{result['statistics']['ambiguous_scoring_lines']} 条。"
                   f"已保存 {args.output}；候选必须人工/Agent 核准。")
