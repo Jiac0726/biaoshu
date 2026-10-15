@@ -9,6 +9,7 @@ from pathlib import Path
 from .core import allocate, initialize, load_project, scaffold, section_path, write_json
 from .quality_gate import inspect_with_evidence
 from .extraction import extract_document
+from .score_candidates import discover_score_candidates
 
 
 def extract_source(source: Path) -> str:
@@ -86,6 +87,13 @@ def main(argv=None):
     ext = sub.add_parser("extract")
     ext.add_argument("source", type=Path)
     ext.add_argument("--output", type=Path, required=True)
+    score_cmd = sub.add_parser("score-candidates", help="提取待核准的技术评分项候选")
+    score_cmd.add_argument("--index", action="append", type=Path, required=True,
+                           help="招标文件证据索引，可多次指定")
+    score_cmd.add_argument("--source-dir", type=Path, required=True,
+                           help="原始招标文件目录，用于验证 SHA-256")
+    score_cmd.add_argument("--output", type=Path, required=True,
+                           help="保存候选 JSON，不修改 requirements.json")
     args = parser.parse_args(argv)
     try:
         if args.command == "init":
@@ -98,6 +106,12 @@ def main(argv=None):
             index_path = args.output.with_suffix(".index.json")
             write_json(index_path, extracted.index)
             print(f"已提取：{args.output}；证据索引：{index_path}。请人工核对缺失文本和提取警告。")
+        elif args.command == "score-candidates":
+            result = discover_score_candidates(args.index, args.source_dir)
+            write_json(args.output, result)
+            print(f"技术评分候选 {len(result['candidates'])} 条；歧义行 "
+                  f"{result['statistics']['ambiguous_scoring_lines']} 条。"
+                  f"已保存 {args.output}；候选必须人工/Agent 核准。")
         elif args.command in ("check", "audit"):
             report = inspect_with_evidence(args.project_dir, strict=args.command == "audit",
                                            index_paths=args.index, source_dir=args.source_dir,
