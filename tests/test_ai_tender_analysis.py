@@ -123,6 +123,98 @@ class TenderAiTests(unittest.TestCase):
         self.assertEqual(result["candidates"], [])
         self.assertEqual(result["status"], "suggestions_only")
 
+    def update_real_source(self, content):
+        from biaoshu.extraction import extract_document
+        self.source.write_text(content, encoding="utf-8")
+        self.index = extract_document(self.source).index
+        self.save_index()
+
+    def test_long_source_score_after_first_3000_chars_survives(self):
+        source = "无" * 3450 + "培训方案：优秀5分"
+        self.update_real_source(source + "\n")
+        result_text = json.dumps({"items": [{
+            "kind": "technical_score", "title": "培训方案", "score": 5,
+            "evidence": {"file": "tender.txt", "location": "第1行",
+                         "quote": "培训方案：优秀5分"},
+            "rationale": "需要人工核实评分方式",
+        }]}, ensure_ascii=False)
+        result, calls = self.run_analysis(result_text)
+        blocks = json.loads(calls[0][2].split("\n\n", 1)[1])
+        self.assertTrue(any("培训方案：优秀5分" in block["text"] for block in blocks))
+        self.assertTrue(all(len(block["text"]) <= 3000 for block in blocks))
+        self.assertEqual(result["candidates"][0]["score"], 5)
+        self.assertEqual(result["statistics"]["long_source_blocks"], 1)
+        self.assertTrue(any("拆分" in item for item in result["warnings"]))
+
+    def test_long_source_omitted_fragment_is_reported(self):
+        self.update_real_source("技术评分" + "甲" * 3300 + "培训方案：优秀5分\n")
+        result, calls = self.run_analysis('{"items":[]}', max_blocks=1)
+        self.assertEqual(result["statistics"]["long_source_blocks"], 1)
+        self.assertGreater(result["statistics"]["omitted_blocks"], 0)
+        self.assertTrue(any("跳过" in item for item in result["warnings"]))
+
+    def test_score_only_technical_line_without_generic_topic_keyword_is_selected(self):
+        self.update_real_source("培训方案：优秀5分\n")
+        result = json.dumps({"items": [{
+            "kind": "technical_score", "title": "培训方案", "score": 5,
+            "evidence": {"file": "tender.txt", "location": "第1行",
+                         "quote": "培训方案：优秀5分"},
+            "rationale": "人工确认是否属于技术评分",
+        }]}, ensure_ascii=False)
+        report, calls = self.run_analysis(result)
+        self.assertEqual(len(report["candidates"]), 1)
+        self.assertIn("培训方案：优秀5分", calls[0][2])
+
+    def test_minutes_not_rated_as_score_or_selected_as_scoring_evidence(self):
+        from biaoshu.ai_tender_analysis import _select_blocks
+        self.update_real_source("服务响应时间30分钟\n")
+        chosen, omitted = _select_blocks([self.index], max_blocks=1, max_chars=4000)
+        self.assertEqual(len(chosen), 1)  # A service requirement, not a score.
+        self.assertEqual(omitted, 0)
+        bogus = json.dumps({"items": [{
+            "kind": "technical_score", "title": "响应速度", "score": 30,
+            "evidence": {"file": "tender.txt", "location": "第1行",
+                         "quote": "服务响应时间30分钟"},
+            "rationale": "数字不应被误当成评分分数",
+        }]}, ensure_ascii=False)
+        with self.assertRaisesRegex(ValueError, "分值无引文依据"):
+            self.run_analysis(bogus)
+
+    def test_model_cannot_invent_score_absent_from_cited_quote(self):
+        self.update_real_source("技术要求：项目实施方案必须完整\n")
+        payload = json.dumps({"items": [{
+            "kind": "technical_score", "title": "实施方案", "score": 100,
+            "evidence": {"file": "tender.txt", "location": "第1行",
+                         "quote": "项目实施方案必须完整"},
+            "rationale": "不得将任意分值编造出来",
+        }]}, ensure_ascii=False)
+        with self.assertRaisesRegex(ValueError, "分值无引文依据"):
+            self.run_analysis(payload)
+
+    def test_multitier_source_requires_null_score(self):
+        self.update_real_source("技术评分：合格得5分，优秀得10分\n")
+        payload = json.loads(self.response(quote="合格得5分，优秀得10分", location="第1行"))
+        with self.assertRaisesRegex(ValueError, "多档评分"):
+            self.run_analysis(json.dumps(payload, ensure_ascii=False))
+        payload["items"][0]["score"] = None
+        report, _ = self.run_analysis(json.dumps(payload, ensure_ascii=False))
+        self.assertIsNone(report["candidates"][0]["score"])
+
+    def test_valid_single_source_score_is_accepted_when_precisely_quoted(self):
+        report, _ = self.run_analysis()
+        self.assertEqual(report["candidates"][0]["score"], 10.0)
+
+    def test_index_extraction_warnings_propagate_with_filename(self):
+        self.index["warnings"] = [
+            "第2页无法识别扫描文字，请核对", "文档中的页眉与文本框未覆盖",
+        ]
+        self.save_index()
+        report, _ = self.run_analysis()
+        self.assertTrue(any("tender.txt：第2页无法识别扫描文字" in w
+                            for w in report["warnings"]))
+        self.assertTrue(any("tender.txt：文档中的页眉与文本框未覆盖" in w
+                            for w in report["warnings"]))
+
     def test_cli_saves_mocked_suggestions_without_touching_project_state(self):
         import contextlib
         import io
