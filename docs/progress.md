@@ -15,3 +15,7 @@
 - `extract` 同时输出 `.index.json`，包含 SHA-256、来源位置、文本块与提取警告；原始资料只留在本地工作区。
 - 增加 TXT、DOCX、PDF 和 CLI 回归测试；扫描页、PDF 双栏、复杂合并单元格等仍需人工核对。
 - 下一步：依据来源索引自动比对 `requirements.json` 中的 evidence 引文、来源版本与位置，明确“未核实/不匹配”状态。
+
+## 2026-10-15 — 证据核验接入主 CLI（待 PR）
+
+基于上一轮的提取索引、`evidence.verify_evidence` 和 `quality_gate.inspect_with_evidence`，为主命令 `check/audit/export` 增加 `--index` 与 `--source-dir`。严格审计与正式 DOCX 导出默认 fail-closed；草稿例外会显著标记。添加 TXT→索引→审计→正式/草稿 Word 的集成测试；完成后以 PR/CI 状态为最终验证依据。尚不包含 LLM 写作器或评分语义核查。

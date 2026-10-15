@@ -80,3 +80,17 @@ python -m unittest discover -s tests -v
 ## 来源说明
 
 本项目参考 OpenBidKit 的通用标书撰写方法论，采用独立实现；不直接复制其 AGPL-3.0 代码。后续若希望复用第三方代码，应先检查许可与分发义务。当前尚未决定本项目自身的开源许可证。
+
+## 原文证据校验与导出门禁（开发分支）
+
+`extract` 除了可读 Markdown 还会生成同名的 `.index.json` 证据索引，保留行/页/段落/表格行位置和原文件 SHA-256。应以招标原文为准填充 `requirements.json` 与 `facts.json` 中证据的 `file/location/quote` 字段。
+
+```bash
+python -m biaoshu extract ./sources/tender.txt --output ./workspaces/my-bid/tender-extracted.md
+python -m biaoshu check ./workspaces/my-bid
+python -m biaoshu audit ./workspaces/my-bid --index ./workspaces/my-bid/tender-extracted.index.json --source-dir ./sources --output ./workspaces/my-bid/reports/audit.json
+python -m biaoshu export ./workspaces/my-bid --index ./workspaces/my-bid/tender-extracted.index.json --source-dir ./sources --output ./output/technical-bid.docx
+python -m biaoshu export ./workspaces/my-bid --draft --output ./output/draft.docx
+```
+
+说明：`check` 可不提供证据索引，但结果会明确标记 `not_checked`；`audit` 与非草稿 `export` 必须同时提供 `--index` 和 `--source-dir`，并验证源文件指纹及逐条引用。多份招标文件可重复传入 `--index`。草稿例外仅允许生成显著标识未完成校验的文档，不代表证据可信。文本匹配不能替代评分语义判断、条款完整性检查与人工终审。
