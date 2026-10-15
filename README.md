@@ -154,3 +154,20 @@ python -m biaoshu outline-lock ./workspaces/my-bid --confirm
 自动验证目录节点、唯一章节覆盖、深度不超过 4 层、拒绝无意义单子节点分组；默认预览不修改文件，明确 --apply 后才写 outline.json，先备份至 reports/outline-backups。层级 Word 导出按树的顺序生成标题。锁定将保护一级节点名称、顺序及其对应章节集合，允许组内下级排序调整。check、audit、export 均检查目录锁；即使 --draft 也不能导出损坏的层级树。
 
 如果已经建立层级目录，review-import 会拒绝直接追加新的 S# 章节，避免遗漏映射或丢失用户确认的目录；需先审查并调整目录结构。该功能为**结构编辑与锁定**，尚非基于模型的自动语义目录规划。目录锁属于本地防误改约束，不是数字签名或抗恶意篡改方案。
+
+
+## AI 分章节草稿生成与人工核准（开发分支）
+
+使用已登记的需求和真实原件证据，为每个稳定 S# 章节生成单独草稿，默认使用本机 OpenAI 兼容模型。模型不会自动获得未核实事实的具体值。
+
+```bash
+python -m biaoshu write-sections ./workspaces/my-bid --section S1 --index ./workspaces/my-bid/tender-extracted.index.json --source-dir ./sources --model YOUR_LOCAL_MODEL
+# 不指定 --section 时按当前目录树顺序执行所有章节；每个章节有独立检查点。
+# 由审稿人亲自核对 S1 正文、评分响应、原文数字和实际承诺，然后执行：
+python -m biaoshu approve-section ./workspaces/my-bid --section S1 --acknowledgement "我已逐项核对本节事实、招标响应和承诺，并批准该正文"
+python -m biaoshu audit ./workspaces/my-bid --index ./workspaces/my-bid/tender-extracted.index.json --source-dir ./sources
+```
+
+章节只在缺失或恰为 scaffold 自动生成的 TODO 占位时写入；已经存在的人工正文及已有 AI 草稿一律跳过，重复执行可续写未完成章节。模型调用失败时记录本地失败检查点，不保存提示词或密钥。输出的 AI 草稿带有待审查提示；严格 audit 与非草稿 export 在章节未批准或批准后内容变化时阻断。审批确认是操作者声明，而非签名或完整语义核验。不得让模型代替人执行批准。
+
+默认本地接口 http://127.0.0.1:11434/v1；远程仅在资料外发已获合法授权并显式加 --allow-remote 时启用。AI 只检验引用过的原文文本存在且模型声明覆盖本节要求，并不保证语义完全覆盖、事实绝不遗漏、标书可正式投标。真实模型兼容性和长文质量有待专项验收。
