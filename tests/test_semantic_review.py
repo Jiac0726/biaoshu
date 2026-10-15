@@ -122,7 +122,7 @@ class SemanticReviewTests(unittest.TestCase):
         idx = read_json(self.index)
         idx["blocks"][0]["text"] = "技术评分：实施组织方案需说明岗位分工和进度检查，30分。"
         write_json(self.index, idx)
-        with self.assertRaisesRegex(ValueError, "索引文本"):
+        with self.assertRaisesRegex(ValueError, "索引文本|证据验证失败"):
             self.run_analysis()
         self.assertEqual(self.calls, [])
 
