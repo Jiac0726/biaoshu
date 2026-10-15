@@ -174,5 +174,50 @@ class ReviewedImportTests(unittest.TestCase):
             self.run_import(apply=True)
 
 
+    def test_review_cli_creates_skeleton_without_overwrite(self):
+        import contextlib
+        import io
+        from biaoshu.cli import main
+        output = self.root / "review-from-cli.json"
+        with contextlib.redirect_stdout(io.StringIO()):
+            rc = main(["review-init", "--suggestions", str(self.suggestions),
+                       "--output", str(output)])
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(read_json(output)["decisions"]), 2)
+        with contextlib.redirect_stderr(io.StringIO()):
+            rc = main(["review-init", "--suggestions", str(self.suggestions),
+                       "--output", str(output)])
+        self.assertEqual(rc, 2)
+
+    def test_review_cli_previews_then_applies_only_with_flag(self):
+        import contextlib
+        import io
+        from biaoshu.cli import main
+        self.decide()
+        options = [
+            "review-import", str(self.project),
+            "--suggestions", str(self.suggestions),
+            "--review", str(self.review_path),
+            "--index", str(self.index_path),
+            "--source-dir", str(self.sources),
+        ]
+        preview = self.root / "preview.json"
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(main([*options, "--output", str(preview)]), 0)
+        self.assertEqual(read_json(preview)["status"], "ready")
+        self.assertEqual(read_json(self.project / "requirements.json")["requirements"], [])
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(main([*options, "--apply"]), 0)
+        self.assertEqual(len(read_json(self.project / "requirements.json")["requirements"]), 1)
+
+    def test_reviewer_cannot_accept_invalid_score(self):
+        data = read_json(self.suggestions)
+        data["candidates"][0]["score"] = True
+        write_json(self.suggestions, data)
+        write_json(self.review_path, review_template(self.suggestions))
+        self.decide()
+        with self.assertRaisesRegex(ValueError, "分值不合法"):
+            self.run_import(apply=True)
+
 if __name__ == "__main__":
     unittest.main()
