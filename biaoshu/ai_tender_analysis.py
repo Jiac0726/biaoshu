@@ -77,7 +77,10 @@ def _request_model(endpoint: str, model: str, prompt: str, *,
         headers["Authorization"] = "Bearer " + api_key
     request = urllib.request.Request(endpoint, data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
                                      headers=headers, method="POST")
-    opener = urllib.request.build_opener(_NoRedirect)
+    # Never let ambient HTTP_PROXY/HTTPS_PROXY redirect confidential bid text
+    # (or bearer tokens), including requests to an explicit loopback endpoint.
+    # Remote use, when authorized, requires an explicit direct connection.
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect)
     try:
         with opener.open(request, timeout=timeout) as response:
             if response.status != 200:
