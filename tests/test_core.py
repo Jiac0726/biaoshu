@@ -2,6 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from biaoshu.core import allocate, initialize, inspect, scaffold, section_path, write_json
 
@@ -38,6 +39,17 @@ class CoreTests(unittest.TestCase):
 
     def test_valid_structure(self):
         self.assertTrue(inspect(self.root)["ok"])
+
+    def test_json_write_preserves_exact_lf_bytes_on_windows(self):
+        path = self.root / "reports" / "chapter-checkpoint.json"
+        data = {"status": "pending_review", "note": "中文示例\n第二行"}
+        expected = (json.dumps(data, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+        # Text-mode writes translate newlines on Windows; checkpoints must
+        # use deterministic binary bytes on all supported platforms.
+        with patch.object(Path, "write_text", side_effect=AssertionError("text-mode JSON write")):
+            write_json(path, data)
+        self.assertEqual(path.read_bytes(), expected)
+        self.assertNotIn(b"\r\n", path.read_bytes())
 
     def test_missing_evidence_is_blocker(self):
         data = json.loads((self.root / "requirements.json").read_text(encoding="utf-8"))
