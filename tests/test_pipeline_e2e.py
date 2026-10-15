@@ -219,6 +219,39 @@ class SyntheticBidPipelineTests(unittest.TestCase):
                                   "--output", str(self.outfile)), 0)
         self.assertTrue(self.outfile.is_file())
 
+    def test_e2e_semantic_review_stays_advisory_and_source_locked(self):
+        from biaoshu.response_trace import ACKNOWLEDGEMENT as TRACE_ACK, trace_path
+        self.prepare_reviewed_outline()
+        self.assertEqual(self.write_all(), 0)
+        self.approve_all()
+        self.assertEqual(self.cli("trace-init", str(self.project)), 0)
+        register = read_json(trace_path(self.project))
+        register["acknowledgement"] = TRACE_ACK
+        for item in register["items"]:
+            row = (self.project / "sections" / (item["section_id"] + ".md")).read_text(encoding="utf-8").splitlines()
+            item.update(line=3, quote=row[2], decision="confirmed")
+        write_json(trace_path(self.project), register)
+        before = trace_path(self.project).read_bytes()
+        def semantic(endpoint, model, prompt, *, api_key, timeout, instructions):
+            data = json.loads(prompt.split("\n", 1)[1])
+            return json.dumps({
+                "verdict": "partial", "severity": "medium",
+                "reason": "已经提出部分实施措施，但还需由审稿人核查评分细则。",
+                "suggestion": "请进一步补充岗位职责、关键节点、过程检查记录与验收依据。",
+                "source_quote": data["tender_source"][:18],
+                "response_quote": data["response_text"][:18],
+            }, ensure_ascii=False)
+        output = self.root / "semantic-suggestions.json"
+        with patch("biaoshu.semantic_review._request_model", side_effect=semantic):
+            self.assertEqual(self.cli(
+                "semantic-review", str(self.project), *self.source_args(),
+                "--model", "fictional-local-model", "--output", str(output)), 0)
+        report = read_json(output)
+        self.assertEqual(report["statistics"]["examined_links"], 2)
+        self.assertTrue(all(x["status"] == "pending_human_review" for x in report["items"]))
+        self.assertEqual(trace_path(self.project).read_bytes(), before)
+        self.assertEqual(self.cli("audit", str(self.project), *self.source_args()), 0)
+
     def test_failure_then_resume_does_not_overwrite_first_chapter(self):
         self.prepare_reviewed_outline()
         def fails_second(endpoint, model, prompt, *, api_key, timeout, instructions):

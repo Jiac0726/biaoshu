@@ -42,3 +42,10 @@
 使用 trace-init（创建待复核模板）和 trace-audit（只读检查或报告输出）维护 reports/response-trace.json。每一条正式 requirements.json 的需求至响应章节关系，都需要真实审稿人在正文稳定后定位至 Markdown 的一个有意义的**实际响应段落**，记录1起始行号与准确原句，同时确认该段确实回答了招标条款。程序校验映射一致、段落所在行、原句子串、章节 SHA-256 与审核声明。
 
 启用这项台账后，严格 audit/正式 Word export 对不存在的定位、遗漏关系、未经审核或正文被改动失败关闭。未启用台账时普通与严格检查都会提示缺少逐项正文审阅。记录 `confirmed` 不代表可靠的身份认证，也不能证明响应内容合规或足够得分；需要独立专业审稿人对照招标原文和完整段落作出语义判定。
+
+
+## 独立 AI 语义审稿建议（v0.10）
+
+在 trace-audit 完整通过后，semantic-review 才允许读取已确认的正文单行及对应招标评分要求原始位置；逐条向显式指定的本地模型发送最少必要文本。返回 verdict（adequate/partial/missing/uncertain）、severity（low/medium/high）、reason、suggestion、source_quote、response_quote。程序验证两端引用是本次提供的原始文本片段，并在完成后再次检查招标源文件、索引、正文和追溯台账的指纹。
+
+本模块刻意**不接入自动正式批准逻辑**：输出 status=suggestions_only，每条审稿结果 pending_human_review，不能提升为机械审稿通过证明。原因：有限正文段落可能遗漏其它小节背景，模型会误判，分档评分复杂；需要独立审稿人将建议与完整招标文件、实际方案和机构真实能力结合判断。

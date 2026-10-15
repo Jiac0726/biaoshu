@@ -210,3 +210,18 @@ python -m biaoshu audit ./workspaces/my-bid --index ./workspaces/my-bid/tender-e
 trace-init 不会覆盖已有审核台账，初始全部 pending；trace-audit 只读检查每个要求的章节映射、Markdown 行号、逐字原句、正文 SHA-256，以及明确人工确认。不能把标题、表格引用、引文块或过短片段当成有效响应。对需求标题、章节映射和正文修改均要求重新审核。
 
 为兼容之前的本地项目，**未启用追溯台账时** strict audit 仍可运行，但会明确警告“尚未建立正文追溯”；**启用台账后**，尚未人工确认、遗漏关系、正文变化或无效定位将使严格 audit 和非草稿 export 失败。追溯通过只说明引用位置存在且操作者声称已核实，不证明实际满足评分条款、没有遗漏专业义务或已经完成法律合规审核。
+
+
+## AI 独立语义审稿（新增，必须人工复核）
+
+当 `trace-audit` 已通过、招标原件索引可核验时，可使用**明确指定的本地模型**逐条比对评分要求与人工定位的实际响应段落：
+
+```bash
+python -m biaoshu semantic-review ./workspaces/my-bid --index ./workspaces/my-bid/tender-extracted.index.json --source-dir ./sources --model YOUR_LOCAL_MODEL --output ./workspaces/my-bid/reports/semantic-review.json
+```
+
+默认使用本机 `http://127.0.0.1:11434/v1`；模型接口必须 OpenAI 兼容，且支持 JSON 格式响应。远程地址默认禁止，真实资料外发须先获得授权并显式添加 `--allow-remote`，可通过 `--api-key-env` 从环境变量读取密钥。
+
+审稿结果是 `suggestions_only`，按每个 `requirement_id + section_id + section_line` 列出 `adequate/partial/missing/uncertain`、风险级别、原因、修订建议、真实原文和正文引文，并逐一标记 `pending_human_review`。模块在调用前验证原件 SHA-256、重新解析索引并检查已确认响应台账；验证生成的双侧引文确实来自提供给模型的原句，调用后再次检查台账、正文和招标原件未变化。**不会自动批准、重写或覆盖任何项目正文；已有报告禁止覆盖。**
+
+该能力是逐项**局部段落**语义建议，不会独立检查全文评分完整性、综合档次和合规性；即使模型判定 adequate，也绝不意味着该评分项已通过专业审核。
