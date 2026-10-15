@@ -312,7 +312,7 @@ def main(argv=None):
                 print(f"警告：正式需求及目录已提交成功，但导入报告未保存至 {args.output}："
                       f"{report_error}。请检查项目、备份目录和现有报告；不要直接重复导入。",
                       file=sys.stderr)
-            print(f"{'已登记' if plan['status'] == 'applied' else '仅预览'}：新增 {plan['statistics']['new_requirements']} 条，
+            print(f"{'已登记' if plan['status'] == 'applied' else '仅预览'}：新增 {plan['statistics']['new_requirements']} 条，"
                   f"多档待处理 {plan['statistics'].get('ambiguous_pending', 0)} 条，"
                   f"拒绝 {plan['statistics']['rejected']} 条，"
                   f"待审 {plan['statistics']['pending']} 条，"
