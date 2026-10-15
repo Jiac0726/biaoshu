@@ -123,6 +123,36 @@ class TenderAiTests(unittest.TestCase):
         self.assertEqual(result["candidates"], [])
         self.assertEqual(result["status"], "suggestions_only")
 
+    def test_cli_saves_mocked_suggestions_without_touching_project_state(self):
+        import contextlib
+        import io
+        from biaoshu.cli import main
+        result = {"status": "suggestions_only", "candidates": [],
+                  "statistics": {"selected_blocks": 1}}
+        output = self.root / "model-suggestions.json"
+        with patch("biaoshu.cli.analyze_tender", return_value=result) as fake:
+            with contextlib.redirect_stdout(io.StringIO()):
+                code = main(["analyze-ai", "--index", str(self.index_path),
+                             "--source-dir", str(self.sources),
+                             "--model", "my-local-model", "--output", str(output)])
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(output.read_text(encoding="utf-8")), result)
+        self.assertEqual(fake.call_args.kwargs["model"], "my-local-model")
+        self.assertFalse(fake.call_args.kwargs["allow_remote"])
+
+    def test_cli_failure_does_not_save_report(self):
+        import contextlib
+        import io
+        from biaoshu.cli import main
+        output = self.root / "failed-suggestions.json"
+        with patch("biaoshu.cli.analyze_tender", side_effect=ValueError("证据未核验")):
+            with contextlib.redirect_stderr(io.StringIO()):
+                code = main(["analyze-ai", "--index", str(self.index_path),
+                             "--source-dir", str(self.sources),
+                             "--model", "my-local-model", "--output", str(output)])
+        self.assertNotEqual(code, 0)
+        self.assertFalse(output.exists())
+
 
 if __name__ == "__main__":
     unittest.main()
