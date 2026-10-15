@@ -322,3 +322,22 @@ python -m biaoshu section-recover ./workspaces/my-bid --section S1 --confirm --u
 - 人工导入用类型敏感的规范 JSON 校验并发修改：1→true 不会因为 Python 中 1==True 而绕过校验。
 - 这些保障不等于跨所有外部编辑器的数据库 ACID 隔离；在正式文件导入期间仍应避免其他程序并行修改。
 
+
+## 第20轮：AI 章节失败、人工接管与审批中断恢复
+
+章节生成失败而没有写入 AI 正文时，操作者可先手动完成 sections/S1.md，确认正文没有 TODO 或 AI 待审标记，再明确执行以下命令归档失败检查点：
+
+```powershell
+python -m biaoshu section-manual ./workspaces/my-bid --section S1 --confirm
+```
+
+系统将失败检查点存入 reports/section-writing/archive/，不会把人工正文认作 AI 已批准草稿，也不会修改其他章节。只有失败且从未提交的 AI 章节允许接管；若仍有 AI 草稿待审标记或中断事务则必须先走原有审查、恢复流程。
+
+章节人工批准现在使用与 AI 草稿生成相同的写前事务日志：即使正文去掉待审标记后，审批检查点写入失败，项目仍会被严格审核拦截。确认旧进程终止后，可用下列命令回滚至带标记的待审核草稿，再重新执行 approve-section：
+
+```powershell
+python -m biaoshu section-recover ./workspaces/my-bid --section S1 --confirm
+```
+
+如果只有孤立 .write.lock、没有事务日志，操作员必须确认进程已经退出，才能同时传 --confirm --unlock-stale。新写作锁包含进程 PID；能证明 PID 仍活动时拒绝清理。绝不可将锁清除当成自动批准或跳过人工复核。双文件写入仅具备日志检测与可核验回退，不是硬件原子事务。
+
