@@ -133,6 +133,73 @@ class HardeningRegressionTests(unittest.TestCase):
         self.assertTrue(analyze_consistency(self.project)["ok"])
         self.assertEqual(analyze_consistency(self.project)["statistics"]["errors"], 0)
 
+    def draft(self, transport=None):
+        from biaoshu.section_writer import write_section
+        self.chapter.unlink(missing_ok=True)
+        def model(*args, **kwargs):
+            return json.dumps({
+                "body": "本项目设置实施协调组、质量控制岗和现场核查环节，明确责任分工和日常检查安排，形成阶段成果清单和复核记录，保障技术要求得到执行。",
+                "used_requirement_ids": ["R1"],
+                "used_fact_keys": [],
+            }, ensure_ascii=False)
+        return write_section(self.project, "S1", [self.index], self.source_dir,
+                             model="test-local-model", transport=transport or model)
+
+    def test_model_source_and_index_changed_together_is_blocked(self):
+        from biaoshu.extraction import extract_document
+        def tamper(*args, **kwargs):
+            self.source.write_text(
+                "技术评分要求写出实施方案\n追加完全不同的招标要求\n", encoding="utf-8")
+            write_json(self.index, extract_document(self.source).index)
+            return json.dumps({
+                "body": "本项目设置实施协调组、质量控制岗和现场核查环节，明确责任分工和日常检查安排，形成阶段成果清单和复核记录，保障技术要求得到执行。",
+                "used_requirement_ids": ["R1"], "used_fact_keys": [],
+            }, ensure_ascii=False)
+        with self.assertRaisesRegex(ValueError, "模型生成期间招标原件或证据索引发生变化"):
+            self.draft(tamper)
+        self.assertFalse(self.chapter.exists())
+
+    def test_changed_requirement_or_fact_blocks_approval(self):
+        from biaoshu.section_writer import approve_section, CONFIRM
+        self.draft()
+        reqs = json.loads((self.project / "requirements.json").read_text(encoding="utf-8"))
+        reqs["requirements"][0]["description"] = "写作后新增现场资格要求"
+        write_json(self.project / "requirements.json", reqs)
+        with self.assertRaisesRegex(ValueError, "正式需求、事实或目录已经变动"):
+            approve_section(self.project, "S1", acknowledgement=CONFIRM)
+
+    def test_approved_chapter_detects_subsequent_fact_changes(self):
+        from biaoshu.section_writer import approve_section, CONFIRM
+        self.draft()
+        approve_section(self.project, "S1", acknowledgement=CONFIRM)
+        self.assertTrue(inspect(self.project, strict=True)["ok"])
+        write_json(self.project / "facts.json", {"facts": [
+            {"key": "project_status", "value": "待甲方确认", "status": "pending"}
+        ]})
+        report = inspect(self.project, strict=True)
+        self.assertFalse(report["ok"])
+        self.assertTrue(any("需求、事实或目录发生变化" in e for e in report["errors"]))
+
+    def test_approved_chapter_detects_source_changes(self):
+        from biaoshu.section_writer import approve_section, CONFIRM
+        self.draft()
+        approve_section(self.project, "S1", acknowledgement=CONFIRM)
+        self.source.write_text(
+            "技术评分要求写出实施方案\n写作后新增特殊评分项\n", encoding="utf-8")
+        report = inspect(self.project, strict=True)
+        self.assertFalse(report["ok"])
+        self.assertTrue(any("招标原件发生变化" in e for e in report["errors"]))
+
+    def test_existing_unbound_checkpoint_cannot_be_approved(self):
+        from biaoshu.section_writer import approve_section, checkpoint_path, CONFIRM
+        self.draft()
+        cp = checkpoint_path(self.project, "S1")
+        meta = json.loads(cp.read_text(encoding="utf-8"))
+        meta.pop("source_manifest")
+        write_json(cp, meta)
+        with self.assertRaisesRegex(ValueError, "检查点缺少原文来源指纹"):
+            approve_section(self.project, "S1", acknowledgement=CONFIRM)
+
     def test_calendar_date_not_parsed_as_year_duration(self):
         self.chapter.write_text(
             "# 实施方案\n\n服务期限为2026年1月1日至2027年12月31日。\n", encoding="utf-8")
