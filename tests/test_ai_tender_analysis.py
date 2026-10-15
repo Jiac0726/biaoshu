@@ -199,6 +199,58 @@ class TenderAiTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "分值无引文依据"):
             self.run_analysis(payload)
 
+    def test_fullwidth_decimal_score_uses_normalized_original(self):
+        self.update_real_source("技术评分：实施方案优秀５．５分\n")
+        payload = json.dumps({"items": [{
+            "kind": "technical_score", "title": "实施方案", "score": 5.5,
+            "evidence": {"file": "tender.txt", "location": "第1行",
+                         "quote": "实施方案优秀５．５分"},
+            "rationale": "有且只有5.5分",
+        }]}, ensure_ascii=False)
+        report, _ = self.run_analysis(payload)
+        self.assertEqual(report["candidates"][0]["score"], 5.5)
+        obj = json.loads(payload)
+        obj["items"][0]["score"] = 5
+        with self.assertRaisesRegex(ValueError, "分值无引文依据"):
+            self.run_analysis(json.dumps(obj, ensure_ascii=False))
+
+    def test_partial_quote_cannot_hide_other_grading_tier(self):
+        self.update_real_source("技术评分：合格得5分，优秀得10分\n")
+        payload = json.dumps({"items": [{
+            "kind": "technical_score", "title": "技术评分", "score": 10,
+            "evidence": {"file": "tender.txt", "location": "第1行",
+                         "quote": "优秀得10分"},
+            "rationale": "模型试图只引用优秀档",
+        }]}, ensure_ascii=False)
+        with self.assertRaisesRegex(ValueError, "多档评分"):
+            self.run_analysis(payload)
+        item = json.loads(payload)
+        item["items"][0]["score"] = None
+        report, _ = self.run_analysis(json.dumps(item, ensure_ascii=False))
+        self.assertIsNone(report["candidates"][0]["score"])
+
+    def test_abbreviated_minutes_not_misclassified_as_score(self):
+        from biaoshu.ai_tender_analysis import _select_blocks
+        self.update_real_source("服务响应时间30分内到场\n培训方案：优秀5分\n")
+        selected, omitted = _select_blocks([self.index], max_blocks=1, max_chars=4000)
+        self.assertEqual(selected[0]["location"], "第2行")
+        self.assertEqual(omitted, 1)
+        payload = json.dumps({"items": [{
+            "kind": "technical_score", "title": "响应时间", "score": 30,
+            "evidence": {"file": "tender.txt", "location": "第1行",
+                         "quote": "服务响应时间30分内到场"},
+            "rationale": "分钟时限不能算评分",
+        }]}, ensure_ascii=False)
+        with self.assertRaisesRegex(ValueError, "分值无引文依据"):
+            self.run_analysis(payload)
+
+    def test_price_score_does_not_consume_technical_evidence_budget(self):
+        from biaoshu.ai_tender_analysis import _select_blocks
+        self.update_real_source("投标报价得5分\n培训方案：优秀5分\n")
+        selected, omitted = _select_blocks([self.index], max_blocks=1, max_chars=4000)
+        self.assertEqual([item["location"] for item in selected], ["第2行"])
+        self.assertEqual(omitted, 0)
+
     def test_model_cannot_invent_score_absent_from_cited_quote(self):
         self.update_real_source("技术要求：项目实施方案必须完整\n")
         payload = json.dumps({"items": [{
@@ -224,15 +276,24 @@ class TenderAiTests(unittest.TestCase):
         self.assertEqual(report["candidates"][0]["score"], 10.0)
 
     def test_index_extraction_warnings_propagate_with_filename(self):
-        self.index["warnings"] = [
-            "第2页无法识别扫描文字，请核对", "文档中的页眉与文本框未覆盖",
-        ]
+        from docx import Document
+        from biaoshu.extraction import extract_document
+        source = self.sources / "tender.docx"
+        document = Document()
+        document.add_paragraph("实施方案评分10分")
+        document.save(source)
+        self.source = source
+        self.index = extract_document(source).index
         self.save_index()
-        report, _ = self.run_analysis()
-        self.assertTrue(any("tender.txt：第2页无法识别扫描文字" in w
+        report, _ = self.run_analysis('{"items":[]}')
+        self.assertTrue(any("tender.docx：DOCX 页码" in w
                             for w in report["warnings"]))
-        self.assertTrue(any("tender.txt：文档中的页眉与文本框未覆盖" in w
-                            for w in report["warnings"]))
+
+    def test_fake_or_removed_extraction_warnings_blocked(self):
+        self.index["warnings"] = ["文件虽然完全可读取，但索引写入了不存在的扫描失败"]
+        self.save_index()
+        with self.assertRaisesRegex(ValueError, "提取警告"):
+            self.run_analysis('{"items":[]}')
 
     def test_cli_saves_mocked_suggestions_without_touching_project_state(self):
         import contextlib
