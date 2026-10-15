@@ -119,3 +119,8 @@ Python 3.10+。在本仓库目录运行：
 ## 人工审核和需求登记门禁
 
 用 review-init 为评分建议生成独立 review.json；由人逐项确认 accept/reject，并亲自填写原文已核对 acknowledgement。不得由 Agent 冒充审稿人员确认。review-import 默认预览，明确添加 --apply 后才可写入 requirements.json 与 outline.json。必须提供原始招标文件和证据索引，登记前将重新解析原件并验证索引/引文。评分规则、未批准或缺少证据的条款不得提升为技术标正文目录。仅生成评分项一一对应的第一版叶子目录，最终目录层级仍需专业审查。
+
+
+## 目录树编辑与一级结构保护
+
+经过审核登记的 outline.json 默认保留 S# 平面叶子，可用 outline-init 生成候选树，再由审稿人组织为根组与叶子节点。outline-plan 默认预览，--apply 才写入；不得凭模型未审核建议修改 S# ID 或对应正文。outline-lock --confirm 仅在用户明确确认一级目录结构后使用。锁定后，一级目录标题、顺序和章节归属不可擅自更改，下级组织可在同一级组的章节点范围内调整。check/audit/export 必须验证目录层级完整性和锁文件。见 references/outline-planning.md。

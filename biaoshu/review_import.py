@@ -201,6 +201,8 @@ def reviewed_import(project_dir: Path, suggestions_path: Path, review_path: Path
             "new_requirements": additions, "new_sections": new_sections,
             "duplicates": duplicates,
             "warnings": ["结构及引文匹配不代表已经完成招标专业和合规审查。"]}
+    if apply and additions and "roots" in current["outline.json"]:
+        raise ValueError("项目已有层级目录：新增需求必须先经人工修订目录树，禁止自动破坏章节覆盖或一级目录锁")
     if not apply or not additions:
         return plan
 

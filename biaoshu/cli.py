@@ -12,6 +12,8 @@ from .extraction import extract_document
 from .score_candidates import discover_score_candidates
 from .ai_tender_analysis import analyze_tender
 from .review_import import review_template, reviewed_import
+from .outline_tree import (outline_template, outline_plan, lock_outline,
+                           walk_outline, validate_outline_state)
 
 
 def extract_source(source: Path) -> str:
@@ -37,11 +39,18 @@ def export_docx(root: Path, dest: Path, draft: bool, *,
     except ImportError as exc:
         raise RuntimeError('DOCX 导出需要 pip install -e ".[docs]"') from exc
     state = load_project(root)
+    tree_errors = validate_outline_state(root, state["outline.json"])
+    if tree_errors:
+        raise ValueError("目录层级或锁定状态无效：" + "; ".join(tree_errors))
     document = Document()
     title = state["project.json"].get("project_name") or "未命名项目"
     document.add_heading(f"{title} — 技术投标文件" + ("（草稿，未完成校验）" if draft else ""), 0)
-    for sec in state["outline.json"]["sections"]:
-        document.add_heading(str(sec["title"]), level=1)
+    for level, kind, item in walk_outline(state["outline.json"]):
+        if kind == "group":
+            document.add_heading(str(item["title"]), level=min(level, 4))
+            continue
+        sec = item
+        document.add_heading(str(sec["title"]), level=min(level, 4))
         path = section_path(root, sec["id"])
         if not path.exists():
             document.add_paragraph(f"[缺少正文：{sec['id']}]")
@@ -53,7 +62,7 @@ def export_docx(root: Path, dest: Path, draft: bool, *,
             if line.startswith("#"):
                 text = line.lstrip("#").strip()
                 if text and text != sec["title"]:
-                    document.add_heading(text, level=min(len(line) - len(line.lstrip("#")) + 1, 4))
+                    document.add_heading(text, level=min(len(line) - len(line.lstrip("#")) + level, 4))
             elif re.match(r"^[-*]\s+", line):
                 document.add_paragraph(re.sub(r"^[-*]\s+", "", line), style="List Bullet")
             elif re.match(r"^\d+[.)]\s+", line):
@@ -125,6 +134,17 @@ def main(argv=None):
     importer.add_argument("--apply", action="store_true",
                           help="经人工逐项审查并填写 acknowledgement 后才实际写入")
     importer.add_argument("--output", type=Path, help="可选预览/导入报告 JSON")
+    outline_init = sub.add_parser("outline-init", help="生成保持章节 ID 的层级目录候选，不覆盖已有文件")
+    outline_init.add_argument("project_dir", type=Path)
+    outline_init.add_argument("--output", type=Path, required=True)
+    outline_cmd = sub.add_parser("outline-plan", help="预览/应用目录层级方案（不修改 S# 和正文）")
+    outline_cmd.add_argument("project_dir", type=Path)
+    outline_cmd.add_argument("--proposal", type=Path, required=True)
+    outline_cmd.add_argument("--apply", action="store_true")
+    outline_cmd.add_argument("--output", type=Path)
+    outline_lock = sub.add_parser("outline-lock", help="显式锁定一级目录名称、顺序和章节归属")
+    outline_lock.add_argument("project_dir", type=Path)
+    outline_lock.add_argument("--confirm", action="store_true")
     args = parser.parse_args(argv)
     try:
         if args.command == "init":
@@ -137,6 +157,22 @@ def main(argv=None):
             index_path = args.output.with_suffix(".index.json")
             write_json(index_path, extracted.index)
             print(f"已提取：{args.output}；证据索引：{index_path}。请人工核对缺失文本和提取警告。")
+        elif args.command == "outline-init":
+            if args.output.exists():
+                raise ValueError("目录候选文件已存在，禁止覆盖，请指定新路径")
+            candidate = outline_template(args.project_dir)
+            write_json(args.output, candidate)
+            print(f"层级目录候选已生成：{args.output}。需要人工核实并编辑 roots 后才能应用。")
+        elif args.command == "outline-plan":
+            report = outline_plan(args.project_dir, args.proposal, apply=args.apply)
+            if args.output:
+                write_json(args.output, report)
+            print(f"目录方案：{report['status']}，一级节点 {report['root_count']} 个，"
+                  f"叶子章节 {report['section_count']} 个；"
+                  f"已锁定：{report['locked']}")
+        elif args.command == "outline-lock":
+            result = lock_outline(args.project_dir, confirm=args.confirm)
+            print(f"一级目录锁：{result['status']}，指纹：{result['sha256']}")
         elif args.command == "review-init":
             if args.output.exists():
                 raise ValueError("审核清单已存在，禁止覆盖人工审核结果；请使用新的输出路径")

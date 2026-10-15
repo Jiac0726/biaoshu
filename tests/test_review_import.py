@@ -159,6 +159,21 @@ class ReviewedImportTests(unittest.TestCase):
         self.assertTrue(Path(second["backup_dir"]).exists())
         self.assertEqual(len(read_json(self.project / "requirements.json")["requirements"]), 2)
 
+    def test_existing_hierarchical_outline_blocks_new_unassigned_sections(self):
+        from biaoshu.outline_tree import outline_template, outline_plan, lock_outline
+        self.decide(("accept", "reject"))
+        self.run_import(apply=True)
+        proposal = self.root / "grouping.json"
+        write_json(proposal, outline_template(self.project))
+        outline_plan(self.project, proposal, apply=True)
+        lock_outline(self.project, confirm=True)
+        previous_outline = (self.project / "outline.json").read_bytes()
+        self.decide(("accept", "accept"))
+        with self.assertRaisesRegex(ValueError, "已有层级目录"):
+            self.run_import(apply=True)
+        self.assertEqual((self.project / "outline.json").read_bytes(), previous_outline)
+        self.assertEqual(len(read_json(self.project / "requirements.json")["requirements"]), 1)
+
     def test_second_import_idempotent(self):
         self.decide()
         self.run_import(apply=True)
