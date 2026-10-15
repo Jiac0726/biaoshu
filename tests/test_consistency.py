@@ -122,9 +122,9 @@ class ConsistencyTests(unittest.TestCase):
         self.assertTrue(analyze_consistency(self.root)["ok"])
 
     def test_hypothetical_and_negated_values_do_not_block_export(self):
-        self.body("S1", "若项目工期为45日，则需要另行审批。\\n"
-                  "示例：工期为60日仅供讨论。\\n"
-                  "并非项目工期为90日。\\n"
+        self.body("S1", "若项目工期为45日，则需要另行审批。\n"
+                  "示例：工期为60日仅供讨论。\n"
+                  "并非项目工期为90日。\n"
                   "项目工期为30日，按计划开展核查。")
         self.body("S2", "项目工期为30日，保障验收工作。")
         report = analyze_consistency(self.root)
