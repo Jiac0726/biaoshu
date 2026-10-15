@@ -75,6 +75,67 @@ class ConsistencyTests(unittest.TestCase):
         self.assertFalse(inspect(self.root, strict=True)["ok"])
         self.assertTrue(any("verified_fact_mismatch" in x for x in inspect(self.root, strict=True)["errors"]))
 
+    def test_ambiguous_verified_duration_is_blocking_not_silent(self):
+        self.set_facts([{"key": "duration", "value": "30日", "status": "verified",
+                         "evidence": {"file": "tender.txt", "location": "第1行",
+                                      "quote": "服务期限30日"}}])
+        self.body("S1", "服务期限为45日。")
+        self.body("S2", "按技术要求设置复核岗位。")
+        result = analyze_consistency(self.root)
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["statistics"]["errors"], 1)
+        self.assertEqual(result["findings"][0]["code"], "ambiguous_verified_duration")
+        self.assertFalse(inspect(self.root, strict=True)["ok"])
+
+    def test_generic_duration_explicitly_mapped_to_service_detects_mismatch(self):
+        self.set_facts([{"key": "duration", "category": "service_duration",
+                         "value": "30日", "status": "verified",
+                         "evidence": {"file": "tender.txt", "location": "第1行",
+                                      "quote": "服务期限30日"}}])
+        self.body("S1", "服务期限为45日。")
+        self.body("S2", "按技术要求设置复核岗位。")
+        result = analyze_consistency(self.root)
+        self.assertFalse(result["ok"])
+        matches = [x for x in result["findings"]
+                   if x["code"] == "verified_fact_mismatch"]
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(matches[0]["fact_key"], "duration")
+        self.assertEqual(matches[0]["verified"], "30日")
+
+    def test_generic_duration_explicit_mapping_and_exact_match(self):
+        self.set_facts([{"key": "duration", "category": "service_duration",
+                         "value": "30日", "status": "verified",
+                         "evidence": {"file": "tender.txt", "location": "第1行",
+                                      "quote": "服务期限30日"}}])
+        self.body("S1", "服务期限为30日。")
+        self.body("S2", "按技术要求设置复核岗位。")
+        report = analyze_consistency(self.root)
+        self.assertTrue(report["ok"])
+        self.assertEqual(report["statistics"]["errors"], 0)
+
+    def test_generic_duration_invalid_category_fails_closed(self):
+        self.set_facts([{"key": "period", "category": "unsupported",
+                         "value": "30日", "status": "verified",
+                         "evidence": {"file": "tender.txt", "location": "第1行",
+                                      "quote": "服务期限30日"}}])
+        self.body("S1", "服务期限为30日。")
+        self.body("S2", "按技术要求设置复核岗位。")
+        report = analyze_consistency(self.root)
+        self.assertFalse(report["ok"])
+        self.assertIn("ambiguous_verified_duration",
+                      [x["code"] for x in report["findings"]])
+
+    def test_bound_generic_duration_is_not_misread_as_equality(self):
+        self.set_facts([{"key": "duration", "category": "service_duration",
+                         "value": "不超过30日", "status": "verified",
+                         "evidence": {"file": "tender.txt", "location": "第1行",
+                                      "quote": "服务期限不超过30日"}}])
+        self.body("S1", "服务期限为20日。")
+        self.body("S2", "按技术要求设置复核岗位。")
+        report = analyze_consistency(self.root)
+        self.assertTrue(report["ok"])
+        self.assertFalse(any(x["code"] == "verified_fact_mismatch" for x in report["findings"]))
+
     def test_check_warns_but_strict_audit_blocks(self):
         self.body("S2", "项目工期为45日。")
         normal = inspect(self.root)
