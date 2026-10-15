@@ -6,43 +6,26 @@ import re
 import sys
 from pathlib import Path
 
-from .core import allocate, initialize, inspect, load_project, scaffold, write_json
+from .core import allocate, initialize, load_project, scaffold, section_path, write_json
+from .quality_gate import inspect_with_evidence
+from .extraction import extract_document
 
 
 def extract_source(source: Path) -> str:
-    suffix = source.suffix.lower()
-    if suffix in (".txt", ".md"):
-        return source.read_text(encoding="utf-8-sig")
-    if suffix == ".pdf":
-        try:
-            from pypdf import PdfReader
-        except ImportError as exc:
-            raise RuntimeError('PDF 读取需要 pip install -e ".[docs]"') from exc
-        pages = []
-        reader = PdfReader(str(source))
-        for index, page in enumerate(reader.pages, 1):
-            text = (page.extract_text() or "").strip()
-            pages.append(f"## {source.name} / 第 {index} 页\n\n{text}\n")
-        if not any(page.extract_text() for page in reader.pages):
-            raise ValueError("PDF 无可提取文本，可能为扫描件，需先 OCR 并人工检查")
-        return "\n".join(pages)
-    if suffix == ".docx":
-        try:
-            from docx import Document
-        except ImportError as exc:
-            raise RuntimeError('DOCX 读取需要 pip install -e ".[docs]"') from exc
-        doc = Document(str(source))
-        paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
-        tables = []
-        for i, table in enumerate(doc.tables, 1):
-            rows = [" | ".join(cell.text.replace("\n", " / ") for cell in row.cells) for row in table.rows]
-            tables.append(f"\n### 表格 {i}\n" + "\n".join(rows))
-        return "\n".join(paragraphs + tables)
-    raise ValueError("当前支持 .txt、.md、.pdf、.docx")
+    """Compatibility helper; CLI also saves a machine-readable evidence index."""
+    return extract_document(source).markdown
 
 
-def export_docx(root: Path, dest: Path, draft: bool):
-    report = inspect(root, strict=True)
+def export_docx(root: Path, dest: Path, draft: bool, *,
+                index_paths: list[Path] | None = None,
+                source_dir: Path | None = None):
+    """Export only after structural and source-locked evidence checks.
+
+    Direct Python callers are subject to the same official-export gate as the CLI.
+    A draft remains explicitly marked unverified and cannot be mistaken for approval.
+    """
+    report = inspect_with_evidence(root, strict=True, index_paths=index_paths,
+                                   source_dir=source_dir, require_evidence=not draft)
     if not report["ok"] and not draft:
         raise ValueError("导出被严格审查阻止；先修复错误，或使用 --draft 输出明确标记的草稿")
     try:
@@ -56,7 +39,7 @@ def export_docx(root: Path, dest: Path, draft: bool):
     document.add_heading(f"{title} — 技术投标文件" + ("（草稿，未完成校验）" if draft else ""), 0)
     for sec in state["outline.json"]["sections"]:
         document.add_heading(str(sec["title"]), level=1)
-        path = root / "sections" / (sec["id"] + ".md")
+        path = section_path(root, sec["id"])
         if not path.exists():
             document.add_paragraph(f"[缺少正文：{sec['id']}]")
             continue
@@ -88,6 +71,11 @@ def main(argv=None):
     for name in command_root:
         cmd = sub.add_parser(name)
         cmd.add_argument("project_dir", type=Path)
+        if name in ("check", "audit", "export"):
+            cmd.add_argument("--index", action="append", type=Path, default=[],
+                             help="证据索引 .index.json，可重复提供多个")
+            cmd.add_argument("--source-dir", type=Path,
+                             help="原始招标文件所在目录（必须与 --index 同时提供）")
         if name == "allocate":
             cmd.add_argument("--total", type=int, required=True, help="全文 AI 正文目标字数")
         if name == "export":
@@ -104,12 +92,16 @@ def main(argv=None):
             initialize(args.project_dir)
             print(f"已初始化：{args.project_dir}")
         elif args.command == "extract":
-            extracted = extract_source(args.source)
+            extracted = extract_document(args.source)
             args.output.parent.mkdir(parents=True, exist_ok=True)
-            args.output.write_text(f"# 招标原文提取\n\n来源：{args.source.name}\n\n{extracted}\n", encoding="utf-8")
-            print(f"已提取：{args.output}。请人工核对页码、表格和缺失文本。")
+            args.output.write_text("\n".join(["# 招标原文提取", "", f"来源：{args.source.name}", "", extracted.markdown]), encoding="utf-8")
+            index_path = args.output.with_suffix(".index.json")
+            write_json(index_path, extracted.index)
+            print(f"已提取：{args.output}；证据索引：{index_path}。请人工核对缺失文本和提取警告。")
         elif args.command in ("check", "audit"):
-            report = inspect(args.project_dir, strict=args.command == "audit")
+            report = inspect_with_evidence(args.project_dir, strict=args.command == "audit",
+                                           index_paths=args.index, source_dir=args.source_dir,
+                                           require_evidence=args.command == "audit")
             if args.output:
                 write_json(args.output, report)
             print(f"{'通过' if report['ok'] else '未通过'}｜{report['statistics']}")
@@ -125,8 +117,10 @@ def main(argv=None):
             result = scaffold(args.project_dir)
             print(f"新建 {len(result)} 个章节文件（不会覆盖已有正文）")
         elif args.command == "export":
-            report = export_docx(args.project_dir, args.output, args.draft)
-            print(f"已导出：{args.output}；机械审查：{'通过' if report['ok'] else '未通过'}")
+            report = export_docx(args.project_dir, args.output, args.draft,
+                                 index_paths=args.index, source_dir=args.source_dir)
+            print(f"已导出：{args.output}；机械审查：{'通过' if report['ok'] else '未通过'}；"
+                  f"证据状态：{report['evidence']['status']}")
         return 0
     except (OSError, ValueError, RuntimeError, KeyError, TypeError) as exc:
         print(f"操作失败：{exc}", file=sys.stderr)

@@ -26,6 +26,7 @@ python -m pip install -e ".[docs]"
 
 # 从招标文件提取文本；再由 Agent 按 SKILL.md 核实和填充 JSON
 python -m biaoshu extract ./tender.pdf --output ./workspaces/my-bid/tender-extracted.md
+# 同时生成 tender-extracted.index.json：SHA-256、原文位置、文本块及警告
 
 # 编辑四个 JSON 后进行结构校验
 python -m biaoshu check ./workspaces/my-bid
@@ -70,12 +71,26 @@ python -m unittest discover -s tests -v
 
 ## 已实现与限制
 
-已实现：TXT/MD 读取、PDF/DOCX 可选读取、评分要求与章节双向映射、证据字段机械检查、事实状态检查、权重与评分分配字数、章节脚手架、基础 Markdown 到 DOCX、CLI、单元测试与 GitHub Actions。
+已实现：TXT/MD 行定位、PDF 页定位、DOCX 段落与表格行顺序定位、SHA-256 证据索引、评分要求与章节双向映射、证据字段机械检查、事实状态检查、权重与评分分配字数、章节脚手架、基础 Markdown 到 DOCX、CLI、单元测试与 GitHub Actions。
 
-尚未实现：自动 LLM 写作执行器、PDF OCR、高保真 DOCX 还原、复杂表格与图片处理、自动生成完整专业标书、标准与法规自动核对。机械审查不等于语义审查或合规审查。
+尚未实现：证据引文自动对照索引校验、自动 LLM 写作执行器、PDF OCR、高保真 DOCX 还原、复杂表格与图片处理、自动生成完整专业标书、标准与法规自动核对。机械审查不等于语义审查或合规审查。
 
 **资料隐私**：本仓库为公开仓库。不要提交真实投标文件、项目报价、密钥、企业商业秘密或客户信息；工作区建议保留在本地。真实业务启用云端模型前先确认用户授权和保密要求。
 
 ## 来源说明
 
 本项目参考 OpenBidKit 的通用标书撰写方法论，采用独立实现；不直接复制其 AGPL-3.0 代码。后续若希望复用第三方代码，应先检查许可与分发义务。当前尚未决定本项目自身的开源许可证。
+
+## 原文证据校验与导出门禁（开发分支）
+
+`extract` 除了可读 Markdown 还会生成同名的 `.index.json` 证据索引，保留行/页/段落/表格行位置和原文件 SHA-256。应以招标原文为准填充 `requirements.json` 与 `facts.json` 中证据的 `file/location/quote` 字段。
+
+```bash
+python -m biaoshu extract ./sources/tender.txt --output ./workspaces/my-bid/tender-extracted.md
+python -m biaoshu check ./workspaces/my-bid
+python -m biaoshu audit ./workspaces/my-bid --index ./workspaces/my-bid/tender-extracted.index.json --source-dir ./sources --output ./workspaces/my-bid/reports/audit.json
+python -m biaoshu export ./workspaces/my-bid --index ./workspaces/my-bid/tender-extracted.index.json --source-dir ./sources --output ./output/technical-bid.docx
+python -m biaoshu export ./workspaces/my-bid --draft --output ./output/draft.docx
+```
+
+说明：`check` 可不提供证据索引，但结果会明确标记 `not_checked`；`audit` 与非草稿 `export` 必须同时提供 `--index` 和 `--source-dir`，并验证源文件指纹及逐条引用。多份招标文件可重复传入 `--index`。草稿例外仅允许生成显著标识未完成校验的文档，不代表证据可信。文本匹配不能替代评分语义判断、条款完整性检查与人工终审。

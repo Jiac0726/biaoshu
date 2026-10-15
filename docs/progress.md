@@ -8,3 +8,14 @@
 - 后续每轮按 roadmap 中最有价值的未完成任务推进，优先以 PR 交付；保留运行结果和下一轮待办。
 
 下一步重点：完善 PDF/DOCX 原文段落与表格的可追溯定位，并增加端到端示例。
+
+## 来源定位与证据索引（2026-10-15）
+
+- 新增独立抽取模块，保留 TXT/MD 原始行号、PDF 页号、DOCX 正文段落与表格行的交错顺序。
+- `extract` 同时输出 `.index.json`，包含 SHA-256、来源位置、文本块与提取警告；原始资料只留在本地工作区。
+- 增加 TXT、DOCX、PDF 和 CLI 回归测试；扫描页、PDF 双栏、复杂合并单元格等仍需人工核对。
+- 下一步：依据来源索引自动比对 `requirements.json` 中的 evidence 引文、来源版本与位置，明确“未核实/不匹配”状态。
+
+## 2026-10-15 — 证据核验接入主 CLI（待 PR）
+
+基于上一轮的提取索引、`evidence.verify_evidence` 和 `quality_gate.inspect_with_evidence`，为主命令 `check/audit/export` 增加 `--index` 与 `--source-dir`。严格审计与正式 DOCX 导出默认 fail-closed；草稿例外会显著标记。添加 TXT→索引→审计→正式/草稿 Word 的集成测试；完成后以 PR/CI 状态为最终验证依据。尚不包含 LLM 写作器或评分语义核查。
