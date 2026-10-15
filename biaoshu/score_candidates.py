@@ -53,8 +53,9 @@ def _source_index(index_path: Path, source_dir: Path) -> dict:
         raise ValueError(f"招标原件已变化，必须重新提取索引：{name}")
     from .extraction import extract_document
     actual = extract_document(source).index
-    if actual["sha256"] != digest or actual["blocks"] != blocks:
-        raise ValueError(f"索引与招标原件解析结果不一致：{name}")
+    if (actual["sha256"] != digest or actual["blocks"] != blocks
+            or actual["warnings"] != data.get("warnings", [])):
+        raise ValueError(f"索引与招标原件解析结果不一致（含提取警告）：{name}")
     return data
 
 
