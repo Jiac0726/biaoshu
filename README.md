@@ -119,3 +119,19 @@ python -m biaoshu analyze-ai --index ./workspaces/my-bid/tender-extracted.index.
 默认接口是 `http://127.0.0.1:11434/v1`。可用 `--endpoint` 指定另一个 OpenAI 兼容 base URL。为防止机密外传，非本地地址默认被拒绝；仅在确认招标资料及模型服务的授权与隐私政策后，才显式添加 `--allow-remote`，并可通过 `--api-key-env VARIABLE_NAME` 从环境变量读取密钥，切勿把密钥写入命令或仓库。
 
 分析时采用有限长度的来源文本块，输出的 `file/location/quote` 要逐条与实际提供给模型的证据块匹配；原文件改变、生成的引文不符、模型输出非法 JSON 时直接报错，不写正式需求。多份文件重复使用 `--index`。对跳过的块、评分分档、遗漏评分项、实质性条款及法律合规要求，仍须通读原文和人工审稿。输出仅是 `suggestions_only`。
+
+
+## 人工审核候选并登记正式需求
+
+此前 analyze-ai 和 score-candidates 只生成待审核建议；现可由审稿人审核后建立一一对应的初版技术标章节。
+
+```bash
+python -m biaoshu review-init --suggestions ./workspaces/my-bid/reports/ai-suggestions.json --output ./workspaces/my-bid/reports/review.json
+# 人工逐项将 decision 修改为 accept/reject，并在核对招标原文后填写 acknowledgement：
+# 我已逐项核对招标原文，并确认接受项可登记为技术响应需求
+python -m biaoshu review-import ./workspaces/my-bid --suggestions ./workspaces/my-bid/reports/ai-suggestions.json --review ./workspaces/my-bid/reports/review.json --index ./workspaces/my-bid/tender-extracted.index.json --source-dir ./sources --output ./workspaces/my-bid/reports/import-preview.json
+# 确认预览后才加 --apply 真实登记
+python -m biaoshu review-import ./workspaces/my-bid --suggestions ./workspaces/my-bid/reports/ai-suggestions.json --review ./workspaces/my-bid/reports/review.json --index ./workspaces/my-bid/tender-extracted.index.json --source-dir ./sources --apply
+```
+
+默认仅预览。程序核对候选文件的 SHA-256、逐条审批、原件指纹，并重新解析原件对照证据索引；通过后只追加正式需求及一一对应叶子章节，保留已有正文，在本地 reports/review-backups 保存导入前备份。scoring_rule 不允许直接创建章节。人工确认字段是操作者声明，不是身份认证；严禁模型代填。目录目前仅为平面初稿，仍需语义审查及多级规划。
