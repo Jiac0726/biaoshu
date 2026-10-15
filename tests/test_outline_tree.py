@@ -154,8 +154,9 @@ class OutlineHierarchyTests(unittest.TestCase):
                                    "--apply"]), 0)
             self.assertEqual(main(["outline-lock", str(self.root), "--confirm"]), 0)
         scaffold(self.root)
-        for sid in ("S1", "S2", "S3"):
-            (self.root / "sections" / (sid + ".md")).write_text("# "+sid+"\n正文内容\n", encoding="utf-8")
+        titles = {"S1": "实施组织", "S2": "进度保障", "S3": "质量保障"}
+        for sid, title in titles.items():
+            (self.root / "sections" / (sid + ".md")).write_text("# " + title + "\n正文内容\n", encoding="utf-8")
         output = self.root / "draft.docx"
         export_docx(self.root, output, draft=True)
         doc = Document(output)
