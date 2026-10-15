@@ -70,6 +70,11 @@ def words(text: str) -> int:
 
 def inspect(root: Path, strict: bool = False) -> dict:
     errors, warnings, observations = [], [], []
+    # An interrupted AI chapter update can leave Markdown and review metadata
+    # in different states. Fail closed until explicit operator recovery.
+    pending = sorted((root / "reports" / "section-writing").glob("*.transaction.json"))
+    if pending:
+        errors.append("存在未恢复的 AI 章节写入事务，禁止审核或正式导出；请执行 section-recover --confirm")
     from .review_transaction import journal_path
     if journal_path(root).exists():
         errors.append("检测到审核导入未完成的事务，禁止审核或导出；请执行 review-recover --confirm")
