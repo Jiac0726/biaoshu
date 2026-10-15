@@ -17,6 +17,8 @@ _EXCLUDED = re.compile(r"报价|价格|投标价|价格分|商务评分|商务�
 _CONTEXT = re.compile(r"技术.{0,6}(?:评审|评分|得分)|(?:评审|评分)因素|评分标准|技术方案评分")
 _HEADING = re.compile(r"\A\s*(?:[一二三四五六七八九十]+[、.]|\d+[、.])?\s*(?:技术评分|技术评审|评分标准|评分因素|技术方案评分)\s*[:：]?\s*\Z")
 _COLUMN = re.compile(r"列\d+\s*[：:]\s*")
+_GENERIC_TITLE = re.compile(r"^(?:技术评分|技术评审|技术标|技术部分|评分标准|评分因素|评审因素|评分项目|评分细则|评分类别|技术方案评分)$")
+_ADJUSTMENT = re.compile(r"(?:每.{0,16}?)?(?:扣|加|减|奖励)\s*\d{1,3}(?:\.\d{1,2})?\s*分(?!钟|期|之)")
 
 
 def _hash_file(path: Path) -> str:
@@ -60,6 +62,8 @@ def _candidate_parts(raw: str, technical_context: bool) -> tuple[str, float] | N
     if _EXCLUDED.search(raw):
         return None
     matches = list(_SCORE.finditer(raw))
+    if _ADJUSTMENT.search(raw):
+        return None
     if not matches or (not _TECH.search(raw) and not technical_context):
         return None
     if len(matches) != 1:
@@ -70,14 +74,16 @@ def _candidate_parts(raw: str, technical_context: bool) -> tuple[str, float] | N
     before = raw[:matches[0].start()]
     if _COLUMN.search(raw):
         columns = [c.strip(" ：:|；;，,（）()") for c in _COLUMN.split(raw) if c.strip()]
-        title = next((c for c in columns if _TECH.search(c) and not _SCORE.search(c)), "")
+        title = next((c for c in columns
+                      if _TECH.search(c) and not _SCORE.search(c)
+                      and not _GENERIC_TITLE.fullmatch(c)), "")
         if not title:
             return None
     else:
         title = re.sub(r"\A\s*(?:[一二三四五六七八九十]+[、.]|\d+[、.])?\s*(?:技术评分|技术评审|评分项目|评分因素)\s*[:：]?", "", before)
         title = re.sub(r"[（(]?\s*\Z", "", title).strip(" ：:|；;，（）()\t")
         title = re.split(r"[：:|;；（(]", title, maxsplit=1)[0].strip()
-    if not title or len(title) > 60:
+    if not title or len(title) > 60 or _GENERIC_TITLE.fullmatch(title):
         return None
     if re.search(r"(?:得分|评分标准|最高分|满分|扣分|加分|总分|评标办法|分值)", title):
         return None
@@ -107,6 +113,20 @@ def discover_score_candidates(index_paths: list[Path], source_dir: Path) -> dict
         for block in index["blocks"]:
             text = block["text"]
             location = block["location"]
+            # DOCX table cells may contain newlines between grading tiers.
+            # Check the *entire table row* before splitting any lines; a
+            # 5/10-point row must not become a standalone 5-point criterion.
+            if block.get("kind") == "table_row" and len(list(_SCORE.finditer(text))) > 1:
+                if not _EXCLUDED.search(text) and (_TECH.search(text) or context):
+                    multi_tier.append({
+                        "id": f"M{len(multi_tier) + 1}",
+                        "score_options": [float(m.group("score")) for m in _SCORE.finditer(text)],
+                        "evidence": {"file": name, "location": location, "quote": text},
+                        "reason": "multiple_scoring_tiers",
+                        "status": "requires_manual_scoring_review",
+                    })
+                skipped += 1
+                continue
             lines = text.splitlines() if "\n" in text else [text]
             for line in lines:
                 line = line.strip()
@@ -117,6 +137,7 @@ def discover_score_candidates(index_paths: list[Path], source_dir: Path) -> dict
                     continue
                 if re.match(r"(?:商务|报价|价格|资格).{0,8}(?:评分|评审)", line):
                     context = False
+                adjustment = bool(_ADJUSTMENT.search(line))
                 parsed = _candidate_parts(line, context)
                 if not parsed:
                     matches = list(_SCORE.finditer(line))
@@ -126,13 +147,13 @@ def discover_score_candidates(index_paths: list[Path], source_dir: Path) -> dict
                         # one guaranteed score. Preserve the exact original
                         # location for review, without creating an importable
                         # numeric requirement that would invent a single value.
-                        if (len(matches) > 1 and not _EXCLUDED.search(line)
-                                and (_TECH.search(line) or context)):
+                        if (len(matches) > 1 or adjustment) and not _EXCLUDED.search(line) and (
+                                _TECH.search(line) or context):
                             multi_tier.append({
                                 "id": f"M{len(multi_tier) + 1}",
                                 "score_options": [float(m.group("score")) for m in matches],
                                 "evidence": {"file": name, "location": location, "quote": line},
-                                "reason": "multiple_scoring_tiers",
+                                "reason": "adjustment_rule" if adjustment else "multiple_scoring_tiers",
                                 "status": "requires_manual_scoring_review",
                             })
                     continue
@@ -152,6 +173,7 @@ def discover_score_candidates(index_paths: list[Path], source_dir: Path) -> dict
         "ambiguous_candidates": multi_tier,
         "warnings": [
             "规则匹配仅提出候选，可能漏检合并单元格、无分值要求或多段评分规则；不能直接导入 requirements.json。",
+            "单项加分/扣分属于评分规则，不是固定分值；将其放入 ambiguous_candidates 人工审核，禁止直接作为总分。",
             "必须由 Agent 比对原文，剔除商务/资格/价格评分项，再确认标题、分值和响应章节。",
             *source_warnings,
         ],
