@@ -31,6 +31,17 @@ class ExtractionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "没有可提取文本"):
             extract_document(source)
 
+    def test_missing_doc_dependencies_show_valid_pip_install_command(self):
+        from unittest.mock import patch
+        import sys
+        for suffix, module in ((".pdf", "pypdf"), (".docx", "docx")):
+            with self.subTest(suffix=suffix):
+                source = self.root / ("missing" + suffix)
+                source.write_bytes(b"not a real source because dependency is mocked")
+                with patch.dict(sys.modules, {module: None}):
+                    with self.assertRaisesRegex(RuntimeError, r'pip install -e "\\.\\[docs\\]"'):
+                        extract_document(source)
+
     def test_docx_keeps_paragraph_table_paragraph_order(self):
         try:
             from docx import Document
