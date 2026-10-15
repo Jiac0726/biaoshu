@@ -22,7 +22,7 @@ from pathlib import Path
 from .core import initialize, load_project, read_json, write_json
 from .review_import import ACKNOWLEDGEMENT
 from .section_writer import CONFIRM
-from .response_trace import audit_trace
+from .response_trace import audit_trace, trace_path, ACKNOWLEDGEMENT as TRACE_ACKNOWLEDGEMENT
 
 PROJECT_RE = re.compile(r"^p-[a-f0-9]{12}$")
 SUPPORTED = {".pdf", ".docx", ".txt", ".md"}
@@ -192,6 +192,7 @@ class Workspace:
                         audit = record
                 except (WebError, OSError, ValueError):
                     pass
+            trace = read_json(trace_path(root)) if trace_path(root).is_file() else None
             sections = []
             for section in project["outline.json"].get("sections", []):
                 if not isinstance(section, dict) or not isinstance(section.get("id"), str):
@@ -224,7 +225,7 @@ class Workspace:
                 "facts": project["facts.json"].get("facts", []),
                 "outline": project["outline.json"], "sections": sections,
                 "suggestions": suggestions, "review": review, "outline_proposal": outline_proposal,
-                "audit": audit, "exports": exports,
+                "audit": audit, "trace": trace, "exports": exports,
                 "report_selection": {k: meta.get(k) for k in ("suggestions", "review", "outline")},
             }
 
@@ -384,6 +385,42 @@ class Workspace:
                 meta["audit"] = dest.name
             elif action == "trace-init":
                 result = self._run("trace-init", root)
+            elif action == "trace-save":
+                path = trace_path(root)
+                if not path.is_file():
+                    raise WebError("请先创建响应追溯台账")
+                trace = read_json(path)
+                items = payload.get("items")
+                if not isinstance(items, list) or len(items) != len(trace.get("items", [])):
+                    raise WebError("必须保留全部需求与章节定位项")
+                lookup = {}
+                for item in items:
+                    if not isinstance(item, dict):
+                        raise WebError("定位记录格式无效")
+                    key = (item.get("requirement_id"), item.get("section_id"))
+                    if key in lookup:
+                        raise WebError("定位记录重复")
+                    lookup[key] = item
+                updated = []
+                for row in trace["items"]:
+                    key = (row["requirement_id"], row["section_id"])
+                    if key not in lookup:
+                        raise WebError("不得增加或删除响应关系")
+                    src = lookup[key]
+                    line = src.get("line")
+                    quote = src.get("quote")
+                    decision = src.get("decision")
+                    if decision not in ("pending", "confirmed"):
+                        raise WebError("无效的响应定位决定")
+                    if (line is not None and (type(line) is not int or not 1 <= line <= 1000000)) or not isinstance(quote, str) or len(quote) > 4000:
+                        raise WebError("行号或响应引文格式无效")
+                    if decision == "confirmed" and (line is None or len(quote.strip()) < 12):
+                        raise WebError("确认的响应必须指定行号和至少 12 字的原句")
+                    updated.append({**row, "line": line, "quote": quote, "decision": decision})
+                trace["items"] = updated
+                trace["acknowledgement"] = TRACE_ACKNOWLEDGEMENT if payload.get("confirmed") is True else ""
+                write_json(path, trace)
+                result = {"ok": True, "message": "逐项定位已保存。确认内容须与章节正文真实行号和原句匹配。"}
             elif action == "trace-audit":
                 result = self._run("trace-audit", root, codes=(0, 1))
             elif action == "semantic-review":
