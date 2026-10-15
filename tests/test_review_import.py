@@ -142,6 +142,72 @@ class ReviewedImportTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "多档评分来源"):
             self.run_import(apply=True)
 
+    def test_unsupported_suggestion_schema_rejected_before_review(self):
+        original = self.suggestions.read_bytes()
+        for version in (None, 2, 999, "1"):
+            with self.subTest(version=version):
+                data = json.loads(original)
+                if version is None:
+                    data.pop("schema_version", None)
+                else:
+                    data["schema_version"] = version
+                write_json(self.suggestions, data)
+                with self.assertRaisesRegex(ValueError, "suggestions_only"):
+                    review_template(self.suggestions)
+                with self.assertRaisesRegex(ValueError, "suggestions_only"):
+                    self.run_import(apply=True)
+        self.suggestions.write_bytes(original)
+
+    def test_same_evidence_different_score_rejected_instead_of_ignored(self):
+        self.decide()
+        self.run_import(apply=True)
+        data = read_json(self.suggestions)
+        data["candidates"][0]["score"] = 100
+        write_json(self.suggestions, data)
+        write_json(self.review_path, review_template(self.suggestions))
+        self.decide()
+        with self.assertRaisesRegex(ValueError, "分值或类型冲突"):
+            self.run_import(apply=True)
+        self.assertEqual(read_json(self.project / "requirements.json")["requirements"][0]["score"], 10)
+
+    def test_same_evidence_different_kind_rejected_instead_of_ignored(self):
+        self.decide()
+        self.run_import(apply=True)
+        data = read_json(self.suggestions)
+        data["candidates"][0]["kind"] = "mandatory_technical_requirement"
+        data["candidates"][0]["score"] = None
+        write_json(self.suggestions, data)
+        write_json(self.review_path, review_template(self.suggestions))
+        self.decide()
+        with self.assertRaisesRegex(ValueError, "分值或类型冲突"):
+            self.run_import(apply=True)
+
+    def test_adjustment_rule_cannot_avoid_explicit_manual_review(self):
+        phrase = "安全措施每缺一项扣2分"
+        self.original.write_text("技术评分\n" + phrase + "\n", encoding="utf-8")
+        write_json(self.index_path, extract_document(self.original).index)
+        write_json(self.suggestions, {
+            "schema_version": 1, "status": "suggestions_only",
+            "candidates": [],
+            "ambiguous_candidates": [{
+                "id": "M1", "reason": "adjustment_rule",
+                "status": "requires_manual_scoring_review",
+                "score_options": [2],
+                "evidence": {"file": "tender.txt", "location": "第2行", "quote": phrase},
+            }],
+        })
+        write_json(self.review_path, review_template(self.suggestions))
+        with self.assertRaisesRegex(ValueError, "未处理"):
+            self.run_import(apply=True)
+        review = read_json(self.review_path)
+        review["acknowledgement"] = ACKNOWLEDGEMENT
+        review["ambiguous_decisions"][0] = {
+            "id": "M1", "decision": "not_applicable",
+            "reason": "逐条核实当前审核范围不适用这项扣分规则",
+        }
+        write_json(self.review_path, review)
+        self.assertEqual(self.run_import(apply=True)["statistics"]["ambiguous_pending"], 0)
+
     def test_template_requires_review(self):
         template = read_json(self.review_path)
         self.assertEqual(template["decisions"],
