@@ -191,10 +191,18 @@ def inspect(root: Path, strict: bool = False) -> dict:
             warnings.append(f"事实 {key} 待确认，生成正文不得填造具体值")
         elif status == "not_specified" and str(fact.get("value", "")).strip():
             errors.append(f"{key} 未提及事项不得填写推测值")
+    from .consistency import analyze_consistency
+    consistency = analyze_consistency(root, data)
+    for finding in consistency["findings"]:
+        detail = f"跨章节承诺[{finding['code']}]：{finding['message']}"
+        if finding["severity"] == "error" and strict:
+            errors.append(detail)
+        else:
+            warnings.append(detail)
     observations.append("仅机械校验，无法替代 AI 语义评分覆盖、矛盾识别及人工终审")
     return {"ok": not errors, "errors": errors, "warnings": warnings,
             "statistics": {"requirements": len(requirements), "sections": len(sections), "facts": len(facts)},
-            "notes": observations}
+            "consistency": consistency, "notes": observations}
 
 
 def allocate(root: Path, total: int):
