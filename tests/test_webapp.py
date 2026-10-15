@@ -9,7 +9,8 @@ import urllib.request
 from pathlib import Path
 
 from biaoshu.webapp import Workspace, WebError, make_server
-from biaoshu.core import write_json
+from biaoshu.core import read_json, write_json
+from biaoshu.response_trace import trace_path
 
 
 class WebWorkspaceTests(unittest.TestCase):
@@ -67,6 +68,29 @@ class WebWorkspaceTests(unittest.TestCase):
             "confirmed": False})
         self.assertEqual(self.workspace.snapshot(self.project)["review"]["acknowledgement"], "")
 
+    def test_manual_trace_update_preserves_existing_review_fingerprint(self):
+        root = self.workspace.root / self.project
+        target = trace_path(root)
+        initial = {"schema_version": 1, "mapping_sha256": "original-mapping",
+                   "acknowledgement": "", "items": [
+                       {"requirement_id": "R1", "section_id": "S1",
+                        "section_sha256": "original-body-hash",
+                        "line": None, "quote": "", "decision": "pending"}]}
+        write_json(target, initial)
+        action = {"action": "trace-save", "confirmed": True, "items": [
+            {"requirement_id": "R1", "section_id": "S1",
+             "line": 3, "quote": "这里是经过审稿人亲自核对的技术响应正文原句",
+             "decision": "confirmed"}]}
+        result = self.workspace.action(self.project, action)
+        self.assertTrue(result["ok"])
+        updated = read_json(target)
+        self.assertEqual(updated["mapping_sha256"], "original-mapping")
+        self.assertEqual(updated["items"][0]["section_sha256"], "original-body-hash")
+        self.assertEqual(updated["items"][0]["line"], 3)
+        self.assertTrue(updated["acknowledgement"])
+        action["items"][0]["line"] = True
+        with self.assertRaisesRegex(WebError, "行号"):
+            self.workspace.action(self.project, action)
     def test_human_approval_requires_explicit_confirmation(self):
         root = self.workspace.root / self.project
         write_json(root / "outline.json", {"sections": [
