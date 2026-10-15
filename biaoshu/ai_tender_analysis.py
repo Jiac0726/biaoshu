@@ -120,15 +120,14 @@ def _select_blocks(indexes: list[dict], *, max_blocks: int, max_chars: int) -> t
     return chosen, len(collected) - len(chosen)
 
 
-def _verify_items(payload: object, indexes: list[dict]) -> list[dict]:
+def _verify_items(payload: object, selected_blocks: list[dict]) -> list[dict]:
     if not isinstance(payload, dict) or set(payload) != {"items"} or not isinstance(payload["items"], list):
         raise ValueError('模型输出必须是仅包含 "items" 数组的 JSON 对象')
     if len(payload["items"]) > 150:
         raise ValueError("候选项超过 150 条，需要分批处理")
     blocks: dict[tuple[str, str], list[str]] = {}
-    for index in indexes:
-        for block in index["blocks"]:
-            blocks.setdefault((index["source_file"], block["location"]), []).append(block["text"])
+    for block in selected_blocks:
+        blocks.setdefault((block["file"], block["location"]), []).append(block["text"])
     output = []
     for i, item in enumerate(payload["items"], 1):
         if not isinstance(item, dict) or set(item) != {"kind", "title", "score", "evidence", "rationale"}:
@@ -191,7 +190,7 @@ def analyze_tender(index_paths: list[Path], source_dir: Path, *,
         payload = json.loads(result_text)
     except (ValueError, TypeError) as exc:
         raise ValueError("模型输出不是有效 JSON，拒绝采纳；请调整模型或重试") from exc
-    items = _verify_items(payload, indexes)
+    items = _verify_items(payload, blocks)
     # Avoid accepting citations after the source file changes during a long model call.
     for index in indexes:
         if _hash_file(source_dir / index["source_file"]) != index["sha256"]:
