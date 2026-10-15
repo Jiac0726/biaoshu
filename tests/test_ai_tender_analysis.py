@@ -180,6 +180,25 @@ class TenderAiTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "分值无引文依据"):
             self.run_analysis(bogus)
 
+    def test_real_scoring_line_outranks_thirty_minute_requirement(self):
+        from biaoshu.ai_tender_analysis import _select_blocks
+        self.update_real_source("服务响应时间30分钟\n培训方案：优秀5分\n")
+        chosen, omitted = _select_blocks([self.index], max_blocks=1, max_chars=4000)
+        self.assertEqual(chosen[0]["location"], "第2行")
+        self.assertIn("优秀5分", chosen[0]["text"])
+        self.assertEqual(omitted, 1)
+
+    def test_numeric_model_score_must_match_quote_not_other_line(self):
+        self.update_real_source("实施方案评分5分\n人员配备评分10分\n")
+        payload = json.dumps({"items": [{
+            "kind": "technical_score", "title": "实施方案", "score": 10,
+            "evidence": {"file": "tender.txt", "location": "第1行",
+                         "quote": "实施方案评分5分"},
+            "rationale": "不能引用第二行的10分为第一行评分",
+        }]}, ensure_ascii=False)
+        with self.assertRaisesRegex(ValueError, "分值无引文依据"):
+            self.run_analysis(payload)
+
     def test_model_cannot_invent_score_absent_from_cited_quote(self):
         self.update_real_source("技术要求：项目实施方案必须完整\n")
         payload = json.dumps({"items": [{
