@@ -82,7 +82,7 @@ def apply_transaction(root: Path, *, before: dict[str, bytes],
     backup.mkdir(parents=True, exist_ok=False)
     try:
         for filename in FILES:
-            with (backup / (filename + ".before")).open("xb") as stream:
+            with (backup / (filename.replace(".json", ".before.json"))).open("xb") as stream:
                 stream.write(before[filename])
                 stream.flush()
                 os.fsync(stream.fileno())
@@ -149,7 +149,7 @@ def recover(root: Path, *, confirm: bool = False) -> dict:
                     isinstance(pair.get(key), str) and len(pair[key]) == 64
                     for key in ("before", "after"))):
                 raise ValueError("审核事务中的文件指纹无效")
-            original[filename] = (backup / (filename + ".before")).read_bytes()
+            original[filename] = (backup / (filename.replace(".json", ".before.json"))).read_bytes()
             current = (root / filename).read_bytes()
             if _hash(original[filename]) != pair["before"]:
                 raise ValueError("原始审核备份指纹错误，拒绝恢复")
