@@ -113,7 +113,7 @@ class ResponseTraceTests(unittest.TestCase):
 
     def test_fenced_code_content_cannot_count_as_response_prose(self):
         self.setup_review()
-        text = "# 项目实施管理\\n\\n" + chr(96) * 3 + "text\\n" + self.a + "\\n" + chr(96) * 3 + "\\n"
+        text = "# 项目实施管理\n\n" + chr(96) * 3 + "text\n" + self.a + "\n" + chr(96) * 3 + "\n"
         self.a_path.write_text(text, encoding="utf-8")
         obj = read_json(trace_path(self.root))
         obj["items"][0]["section_sha256"] = __import__("hashlib").sha256(
