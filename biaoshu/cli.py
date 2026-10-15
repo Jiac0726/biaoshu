@@ -10,6 +10,7 @@ from .core import allocate, initialize, load_project, scaffold, section_path, wr
 from .quality_gate import inspect_with_evidence
 from .extraction import extract_document
 from .score_candidates import discover_score_candidates
+from .ai_tender_analysis import analyze_tender
 
 
 def extract_source(source: Path) -> str:
@@ -94,6 +95,23 @@ def main(argv=None):
                            help="原始招标文件目录，用于验证 SHA-256")
     score_cmd.add_argument("--output", type=Path, required=True,
                            help="保存候选 JSON，不修改 requirements.json")
+    ai_cmd = sub.add_parser("analyze-ai", help="调用显式指定的本地 AI 模型分析已索引的招标原文")
+    ai_cmd.add_argument("--index", action="append", type=Path, required=True,
+                        help="证据索引，可重复传入")
+    ai_cmd.add_argument("--source-dir", type=Path, required=True,
+                        help="必须包含未修改的原始招标文件")
+    ai_cmd.add_argument("--model", required=True,
+                        help="明确指定已安装的模型名称")
+    ai_cmd.add_argument("--endpoint", default="http://127.0.0.1:11434/v1",
+                        help="OpenAI 兼容 base URL；默认 Ollama 本地服务")
+    ai_cmd.add_argument("--allow-remote", action="store_true",
+                        help="明确允许将招标资料发送到远程模型服务；请先获得资料授权")
+    ai_cmd.add_argument("--api-key-env",
+                        help="可选：从指定环境变量读取 API key；不写入命令参数、日志或仓库")
+    ai_cmd.add_argument("--timeout", type=float, default=90,
+                        help="模型请求超时秒数（1-600）")
+    ai_cmd.add_argument("--output", type=Path, required=True,
+                        help="写入待人工确认建议 JSON，永不覆盖正式 requirements.json")
     args = parser.parse_args(argv)
     try:
         if args.command == "init":
@@ -106,6 +124,14 @@ def main(argv=None):
             index_path = args.output.with_suffix(".index.json")
             write_json(index_path, extracted.index)
             print(f"已提取：{args.output}；证据索引：{index_path}。请人工核对缺失文本和提取警告。")
+        elif args.command == "analyze-ai":
+            result = analyze_tender(args.index, args.source_dir, model=args.model,
+                                    endpoint=args.endpoint, allow_remote=args.allow_remote,
+                                    api_key_env=args.api_key_env, timeout=args.timeout)
+            write_json(args.output, result)
+            print(f"AI 分析建议 {len(result['candidates'])} 项；"
+                  f"选用证据块 {result['statistics']['selected_blocks']} 个；"
+                  f"已保存 {args.output}。必须人工复核，不自动修改正式需求。")
         elif args.command == "score-candidates":
             result = discover_score_candidates(args.index, args.source_dir)
             write_json(args.output, result)
