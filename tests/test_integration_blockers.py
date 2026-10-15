@@ -197,6 +197,31 @@ class HardeningRegressionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "检查点缺少原文来源指纹"):
             approve_section(self.project, "S1", acknowledgement=CONFIRM)
 
+    def test_minute_level_conflicting_response_times_are_detected(self):
+        self.chapter.write_text(
+            "# 实施方案\n\n响应时间为30分钟，响应时限为60分钟。\n",
+            encoding="utf-8")
+        result = analyze_consistency(self.project)
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["statistics"]["commitments_detected"], 2)
+        self.assertIn("within_section_conflict", [x["code"] for x in result["findings"]])
+
+    def test_bold_markdown_cannot_hide_conflicting_durations(self):
+        self.chapter.write_text(
+            "# 实施方案\n\n**项目工期**：30日。\n项目工期：**45日**。\n",
+            encoding="utf-8")
+        result = analyze_consistency(self.project)
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["statistics"]["commitments_detected"], 2)
+
+    def test_quoted_obsolete_duration_is_not_current_promise(self):
+        self.chapter.write_text(
+            "# 实施方案\n\n旧记录“项目工期为30日”，已经废止。项目工期为45日。\n",
+            encoding="utf-8")
+        result = analyze_consistency(self.project)
+        self.assertEqual(result["statistics"]["commitments_detected"], 1)
+        self.assertTrue(result["ok"])
+
     def test_calendar_date_not_parsed_as_year_duration(self):
         self.chapter.write_text(
             "# 实施方案\n\n服务期限为2026年1月1日至2027年12月31日。\n", encoding="utf-8")
