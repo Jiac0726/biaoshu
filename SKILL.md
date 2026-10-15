@@ -78,7 +78,7 @@ Python 3.10+。在本仓库目录运行：
 
 先运行确定性审查：
 
-`python -m biaoshu audit ./workspaces/my-bid --output ./workspaces/my-bid/reports/audit.json`
+`python -m biaoshu audit ./workspaces/my-bid --index ./workspaces/my-bid/tender-extracted.index.json --source-dir ./sources --output ./workspaces/my-bid/reports/audit.json`
 
 再由 Agent 做**语义审查**：逐项核对原文评分覆盖，建立章节—评分项—证据对照；核对工期、服务范围、指标、人员、设备、承诺的一致性；检查否决性响应要求；对质量缺口提出精确章节修复建议。审核整改只改与问题关联的内容，必要时请用户确认。机械审查不包含以上语义判断。
 
@@ -86,7 +86,7 @@ Python 3.10+。在本仓库目录运行：
 
 安装 docs 可选依赖后：
 
-`python -m biaoshu export ./workspaces/my-bid --output ./output/technical-bid.docx`
+`python -m biaoshu export ./workspaces/my-bid --index ./workspaces/my-bid/tender-extracted.index.json --source-dir ./sources --output ./output/technical-bid.docx`
 
 严格审查有阻塞错误时，默认禁止导出；`--draft` 只用于生成明确标注为草稿的未完成文件。当前导出支持基本标题、正文和列表；复杂表格、页眉页脚、分节、图注、暗标/电子招标格式需要后续专用模板工具，不得宣称已满足全部格式要求。
 

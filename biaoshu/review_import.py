@@ -26,7 +26,9 @@ def _digest(path: Path) -> str:
 
 def _read_suggestions(path: Path) -> list[dict]:
     data = read_json(path)
-    if (not isinstance(data, dict) or data.get("status") != "suggestions_only"
+    if (not isinstance(data, dict) or type(data.get("schema_version")) is not int
+            or data["schema_version"] != 1
+            or data.get("status") != "suggestions_only"
             or not isinstance(data.get("candidates"), list)):
         raise ValueError("候选文件必须是 suggestions_only 类型的完整 JSON")
     ids = set()
@@ -50,8 +52,12 @@ def _ambiguous_candidates(suggestions_path: Path, candidates: list[dict]) -> lis
                 or not isinstance(item.get("id"), str)
                 or not ID_RE.fullmatch(item["id"]) or item["id"] in ids
                 or item.get("status") != "requires_manual_scoring_review"
+                or item.get("reason") not in {"multiple_scoring_tiers", "adjustment_rule"}
                 or not isinstance(item.get("score_options"), list)
-                or len(item["score_options"]) < 2
+                or len(item["score_options"]) < (1 if item.get("reason") == "adjustment_rule" else 2)
+                or any(isinstance(v, bool) or not isinstance(v, (int, float))
+                       or not math.isfinite(v) or not 0 <= v <= 999
+                       for v in item["score_options"])
                 or not isinstance(item.get("evidence"), dict)
                 or any(not isinstance(item["evidence"].get(key), str)
                        or not item["evidence"][key].strip()
@@ -237,8 +243,14 @@ def _reviewed_import_impl(project_dir: Path, suggestions_path: Path, review_path
             raise ValueError(f"{candidate['id']} 引文与重新提取的招标原文不匹配")
         key = ev["file"], ev["location"], quote
         if key in existing:
-            if existing[key].get("title") != title:
-                raise ValueError(f"{candidate['id']} 与现存需求使用相同证据但标题冲突")
+            known = existing[key]
+            # A legacy manual entry may have no kind. Its implicit category
+            # is technical_score, consistent with v1 candidate defaults.
+            if (known.get("title") != title
+                    or known.get("score") != score
+                    or known.get("kind", "technical_score") != kind):
+                raise ValueError(f"{candidate['id']} 与现存需求使用相同证据，但标题、分值或类型冲突；"
+                                 "不得静默保留旧分值")
             duplicates.append(candidate["id"])
             continue
         rid, sid = _next_id("R", used_req), _next_id("S", used_sec)
