@@ -284,14 +284,18 @@ def _reviewed_import_impl(project_dir: Path, suggestions_path: Path, review_path
             "new_requirements": additions, "new_sections": new_sections,
             "duplicates": duplicates,
             "warnings": ["结构及引文匹配不代表已经完成招标专业和合规审查。"]}
-    if additions and "roots" in current["outline.json"]:
+    if additions and current["outline.json"].get("roots") is not None:
         plan["status"] = "blocked_hierarchical_outline"
         plan["warnings"].append(
             "现有目录已设一级 roots：本次新增章节无法自动加入已锁定树；"
             "请人工修订目录并核准。此预览不可直接 --apply。")
         if apply:
             raise ValueError("项目已有层级目录：新增需求必须先经人工修订目录树，禁止自动破坏章节覆盖或一级目录锁")
-    if not apply or not additions:
+    if not additions:
+        if apply:
+            plan["status"] = "already_registered" if duplicates else "no_changes"
+        return plan
+    if not apply:
         return plan
 
     before_req = (project_dir / "requirements.json").read_bytes()
@@ -300,8 +304,12 @@ def _reviewed_import_impl(project_dir: Path, suggestions_path: Path, review_path
     # can change project files during that work, even while our cooperative
     # import lock is held. Do not build an 'after' based on stale in-memory
     # data and treat freshly modified file bytes as the transaction's 'before'.
-    if (json.loads(before_req) != current["requirements.json"]
-            or json.loads(before_sec) != current["outline.json"]):
+    def exact_json(value: object) -> str:
+        return json.dumps(value, ensure_ascii=False, sort_keys=True,
+                          separators=(",", ":"), allow_nan=False)
+
+    if (exact_json(json.loads(before_req)) != exact_json(current["requirements.json"])
+            or exact_json(json.loads(before_sec)) != exact_json(current["outline.json"])):
         raise ValueError("审核导入规划期间项目需求或目录被外部修改，拒绝使用过时快照覆盖")
     req_after = {**current["requirements.json"], "requirements": [*reqs, *additions]}
     sec_after = {**current["outline.json"], "sections": [*sections, *new_sections]}
