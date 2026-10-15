@@ -266,3 +266,12 @@ python -m biaoshu section-recover ./workspaces/my-bid --section S1 --confirm --u
 ## 离线 Release Candidate 集成验收
 
 建立在 PR #12 已测试快照上的独立 `release/rc-integration-validation-20261015` 分支提供可重复执行的 `python scripts/validate_release_candidate.py`，依次核验全部 unittest、虚构标书端到端 Word 生成和 CLI 启动。详见 [验收清单](docs/release-candidate-20261015.md)。这并非真实模型质量测试，也不表示 PR 已获独立批准或合并主分支。
+
+
+## P1 审查消项与通用期限键
+
+[审查追溯矩阵](docs/p1-review-closure-20261015.md) 已将原始 PR #1/#3/#6/#7 的 12 条 P1 风险逐一映射到累积版本的具体修复代码与回归测试。
+
+历史数据如使用 `facts.json` 中的泛化期限键 `duration` / `period` / `期限` / `时长`，并标记 `verified`，现在需要显式声明 `category` 为 `project_duration`、`service_duration`、`warranty_duration` 或 `response_time`。未声明会返回 `ambiguous_verified_duration` 并阻断严格审核，不会未经事实支持将通用期限擅自对应某一合同义务。
+
+此变更是失败关闭的兼容性变更，旧项目需人工确认期限类型后才能通过正式导出；仍需独立代码审查与合规验收。

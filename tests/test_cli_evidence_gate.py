@@ -30,7 +30,7 @@ class CliEvidenceIntegrationTests(unittest.TestCase):
              "response_sections": ["S1"]},
         ]})
         write_json(self.project / "facts.json", {"facts": [
-            {"key": "duration", "value": "30日", "status": "verified",
+            {"key": "delivery_time", "value": "30日", "status": "verified",
              "evidence": {"file": "tender.txt", "location": "第2行", "quote": "交付时间：30日"}}
         ]})
         write_json(self.project / "outline.json", {"sections": [

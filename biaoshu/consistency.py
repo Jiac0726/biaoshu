@@ -83,10 +83,33 @@ def analyze_consistency(root: Path, state: dict | None = None) -> dict:
         raise ValueError("facts 与 sections 必须是数组")
     baselines: dict[str, list[dict]] = defaultdict(list)
     pending: set[str] = set()
+    mapping_findings: list[dict] = []
+    generic_duration_keys = {"duration", "period", "期限", "时长"}
     for fact in facts:
         if not isinstance(fact, dict) or not isinstance(fact.get("key"), str):
             continue
         key = fact["key"].strip().lower()
+        # Historically valid, free-form 'duration' fact keys must not
+        # silently bypass the verified-fact comparison or be guessed into
+        # an unrelated type of duration. Require an explicit category.
+        if key in generic_duration_keys:
+            category = fact.get("category")
+            if not isinstance(category, str) or category not in _LABELS:
+                if fact.get("status") == "verified":
+                    mapping_findings.append({
+                        "severity": "error", "code": "ambiguous_verified_duration",
+                        "fact_key": fact["key"],
+                        "message": (f"已核实事实 {fact['key']} 未声明期限类型："
+                                    "请补 category=project_duration/service_duration/"
+                                    "warranty_duration/response_time，不允许静默忽略"),
+                    })
+                continue
+            if fact.get("status") == "pending":
+                pending.add(category)
+            reference = _reference(fact)
+            if reference is not None:
+                baselines[category].append({"key": fact["key"], "value": reference})
+            continue
         for cat, aliases in _KEYS.items():
             if key not in aliases:
                 continue
@@ -139,7 +162,7 @@ def analyze_consistency(root: Path, state: dict | None = None) -> dict:
                     "category": cat, "section_id": sid, "line": number,
                     "value": value, "unit": unit, "excerpt": trimmed[:180],
                 })
-    findings: list[dict] = []
+    findings: list[dict] = list(mapping_findings)
     grouped: dict[tuple[str, str], list[dict]] = defaultdict(list)
     for observation in observations:
         grouped[(observation["category"], observation["unit"])].append(observation)
@@ -184,6 +207,7 @@ def analyze_consistency(root: Path, state: dict | None = None) -> dict:
                        "errors": len(errors), "warnings": len(findings) - len(errors)},
         "limitations": [
             "仅识别工期、服务期限、质保期、响应时间中的明确数值等式，不分析全文所有承诺",
+            "通用 duration/period/期限/时长 事实键必须声明 category，否则已核实期限不参与比对并产生审查错误",
             "不同单位的数值不自动比较或换算；上下限、条件、引用原文和专业语义必须人工判断",
             "无冲突仅表示未发现上述模式的不一致，不证明内容准确、评分覆盖完整或投标合规",
         ],
