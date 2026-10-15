@@ -82,6 +82,27 @@ class ScoreCandidatesTests(unittest.TestCase):
         self.assertFalse(result["candidates"])
         self.assertEqual(result["statistics"]["ambiguous_scoring_lines"], 1)
 
+    def test_multi_tier_values_saved_for_human_review_without_numeric_approval(self):
+        self.blocks = [{"location": "第3页", "kind": "page",
+                        "text": "质量保障措施：合格得5分，优秀得10分"}]
+        self.save_index()
+        report = self.parser_only()
+        self.assertEqual(report["candidates"], [])
+        self.assertEqual(report["statistics"]["multi_tier_lines"], 1)
+        item = report["ambiguous_candidates"][0]
+        self.assertEqual(item["score_options"], [5.0, 10.0])
+        self.assertEqual(item["status"], "requires_manual_scoring_review")
+        self.assertEqual(item["evidence"]["location"], "第3页")
+        self.assertNotIn("score", item)
+
+    def test_bidding_price_multi_tier_is_not_technical_candidate(self):
+        self.blocks = [{"location": "第1页", "kind": "page",
+                        "text": "商务评分：报价合格得5分，报价优秀得10分"}]
+        self.save_index()
+        report = self.parser_only()
+        self.assertFalse(report["ambiguous_candidates"])
+        self.assertFalse(report["candidates"])
+
     def test_pdf_page_lines_are_independent(self):
         self.blocks = [{"location": "第7页", "kind": "page",
                         "text": "技术评分\n实施组织方案：10分\n质量保障措施：15分"}]
