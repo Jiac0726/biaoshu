@@ -10,6 +10,7 @@ import base64
 import hashlib
 import json
 import os
+import sys
 from pathlib import Path
 
 from .core import read_json, write_json, section_path
@@ -53,6 +54,55 @@ def stage(root: Path, sid: str, markdown: bytes, checkpoint: bytes, *,
     return marker
 
 
+def _windows_pid_running(pid: int) -> bool:
+    """Query Windows kernel process state without sending any signal.
+
+    Unlike POSIX, os.kill(pid, 0) on Windows may TerminateProcess. Treat
+    denied/unknown queries as unsafe to recover; never guess that it died.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    open_process = kernel32.OpenProcess
+    open_process.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+    open_process.restype = wintypes.HANDLE
+    get_exit_code = kernel32.GetExitCodeProcess
+    get_exit_code.argtypes = (wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD))
+    get_exit_code.restype = wintypes.BOOL
+    close_handle = kernel32.CloseHandle
+    close_handle.argtypes = (wintypes.HANDLE,)
+    close_handle.restype = wintypes.BOOL
+
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    ERROR_INVALID_PARAMETER = 87  # PID does not exist
+    STILL_ACTIVE = 259
+    handle = open_process(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        error = ctypes.get_last_error()
+        if error == ERROR_INVALID_PARAMETER:
+            return False
+        raise OSError(error, "无法通过 Windows API 验证章节锁所属进程状态")
+    try:
+        exit_code = wintypes.DWORD()
+        if not get_exit_code(handle, ctypes.byref(exit_code)):
+            error = ctypes.get_last_error()
+            raise OSError(error, "Windows GetExitCodeProcess 查询失败")
+        return exit_code.value == STILL_ACTIVE
+    finally:
+        close_handle(handle)
+
+
+def _pid_running(pid: int) -> bool:
+    if sys.platform == "win32":
+        return _windows_pid_running(pid)
+    try:
+        os.kill(pid, 0)  # On POSIX, signal 0 probes without terminating.
+    except ProcessLookupError:
+        return False
+    return True
+
+
 def _reject_live_lock_owner(lock: Path) -> None:
     """Never roll back a journal while its writing/approval owner is alive."""
     try:
@@ -62,12 +112,10 @@ def _reject_live_lock_owner(lock: Path) -> None:
         pid = None  # Historic locks without a PID require explicit confirmation.
     if type(pid) is int and pid > 0:
         try:
-            os.kill(pid, 0)
-        except ProcessLookupError:
-            pass
+            running = _pid_running(pid)
         except (PermissionError, OSError) as exc:
             raise ValueError("无法证明章节写入或审批进程已结束，禁止恢复") from exc
-        else:
+        if running:
             raise ValueError("章节写入或审批进程仍然存活，拒绝恢复或清理活动锁")
 
 
