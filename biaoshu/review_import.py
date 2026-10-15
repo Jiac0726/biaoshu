@@ -284,13 +284,25 @@ def _reviewed_import_impl(project_dir: Path, suggestions_path: Path, review_path
             "new_requirements": additions, "new_sections": new_sections,
             "duplicates": duplicates,
             "warnings": ["结构及引文匹配不代表已经完成招标专业和合规审查。"]}
-    if apply and additions and "roots" in current["outline.json"]:
-        raise ValueError("项目已有层级目录：新增需求必须先经人工修订目录树，禁止自动破坏章节覆盖或一级目录锁")
+    if additions and "roots" in current["outline.json"]:
+        plan["status"] = "blocked_hierarchical_outline"
+        plan["warnings"].append(
+            "现有目录已设一级 roots：本次新增章节无法自动加入已锁定树；"
+            "请人工修订目录并核准。此预览不可直接 --apply。")
+        if apply:
+            raise ValueError("项目已有层级目录：新增需求必须先经人工修订目录树，禁止自动破坏章节覆盖或一级目录锁")
     if not apply or not additions:
         return plan
 
     before_req = (project_dir / "requirements.json").read_bytes()
     before_sec = (project_dir / "outline.json").read_bytes()
+    # load_project() is parsed before source re-extraction. External editors
+    # can change project files during that work, even while our cooperative
+    # import lock is held. Do not build an 'after' based on stale in-memory
+    # data and treat freshly modified file bytes as the transaction's 'before'.
+    if (json.loads(before_req) != current["requirements.json"]
+            or json.loads(before_sec) != current["outline.json"]):
+        raise ValueError("审核导入规划期间项目需求或目录被外部修改，拒绝使用过时快照覆盖")
     req_after = {**current["requirements.json"], "requirements": [*reqs, *additions]}
     sec_after = {**current["outline.json"], "sections": [*sections, *new_sections]}
     review_stamp = _digest(review_path)

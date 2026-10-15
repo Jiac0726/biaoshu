@@ -507,6 +507,127 @@ class ReviewedImportTests(unittest.TestCase):
             self.assertEqual(main([*options, "--apply"]), 0)
         self.assertEqual(len(read_json(self.project / "requirements.json")["requirements"]), 1)
 
+    def test_apply_output_exists_is_rejected_before_any_project_commit(self):
+        from biaoshu.cli import main
+        import contextlib
+        import io
+        self.decide()
+        destination = self.root / "already-existing-review.json"
+        destination.write_text("manual reviewed results", encoding="utf-8")
+        options = [
+            "review-import", str(self.project), "--apply",
+            "--suggestions", str(self.suggestions),
+            "--review", str(self.review_path),
+            "--index", str(self.index_path), "--source-dir", str(self.sources),
+            "--output", str(destination),
+        ]
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(main(options), 2)
+        self.assertEqual(destination.read_text(encoding="utf-8"),
+                         "manual reviewed results")
+        self.assertEqual(read_json(self.project / "requirements.json")["requirements"], [])
+        self.assertEqual(read_json(self.project / "outline.json")["sections"], [])
+        self.assertFalse((self.project / "reports" / "review-import-transaction.json").exists())
+
+    def test_postcommit_report_io_error_reports_committed_import_not_failure(self):
+        from biaoshu.cli import main
+        from unittest.mock import patch
+        import contextlib
+        import io
+        self.decide()
+        output = self.root / "unwritable-report.json"
+        options = [
+            "review-import", str(self.project), "--apply",
+            "--suggestions", str(self.suggestions),
+            "--review", str(self.review_path),
+            "--index", str(self.index_path), "--source-dir", str(self.sources),
+            "--output", str(output),
+        ]
+        stderr, stdout = io.StringIO(), io.StringIO()
+        with patch("biaoshu.cli.write_new_report", side_effect=PermissionError(
+                    "synthetic permission failure")), \
+                contextlib.redirect_stderr(stderr), contextlib.redirect_stdout(stdout):
+            self.assertEqual(main(options), 0)
+        self.assertIn("已提交成功", stderr.getvalue())
+        self.assertIn("不要直接重复导入", stderr.getvalue())
+        self.assertIn("已登记", stdout.getvalue())
+        self.assertEqual(len(read_json(self.project / "requirements.json")["requirements"]), 1)
+        self.assertEqual(len(read_json(self.project / "outline.json")["sections"]), 1)
+        self.assertFalse(output.exists())
+        self.assertFalse((self.project / "reports" / "review-import-transaction.json").exists())
+
+    def test_import_report_published_exclusively_and_cannot_be_replaced(self):
+        from biaoshu.cli import main
+        import contextlib
+        import io
+        self.decide()
+        destination = self.root / "import-plan.json"
+        opts = [
+            "review-import", str(self.project), "--suggestions", str(self.suggestions),
+            "--review", str(self.review_path), "--index", str(self.index_path),
+            "--source-dir", str(self.sources), "--output", str(destination),
+        ]
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(main(opts), 0)
+        self.assertEqual(read_json(destination)["status"], "ready")
+        original = destination.read_bytes()
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(main(opts), 2)
+        self.assertEqual(destination.read_bytes(), original)
+
+    def test_external_editor_changes_requirements_during_extraction_blocks_commit(self):
+        from unittest.mock import patch
+        import biaoshu.review_import as module
+        self.decide()
+        req = self.project / "requirements.json"
+        original = module._source_blocks
+        def edit_during_extraction(index_paths, source_dir):
+            payload = read_json(req)
+            payload["manual_note"] = "someone edited between load and commit"
+            write_json(req, payload)
+            return original(index_paths, source_dir)
+        with patch.object(module, "_source_blocks", side_effect=edit_during_extraction):
+            with self.assertRaisesRegex(ValueError, "过时快照"):
+                self.run_import(apply=True)
+        self.assertEqual(read_json(req)["manual_note"],
+                         "someone edited between load and commit")
+        self.assertEqual(read_json(self.project / "outline.json")["sections"], [])
+        self.assertFalse((self.project / "reports" / "review-import-transaction.json").exists())
+
+    def test_external_editor_changes_outline_during_extraction_blocks_commit(self):
+        from unittest.mock import patch
+        import biaoshu.review_import as module
+        self.decide()
+        path = self.project / "outline.json"
+        original = module._source_blocks
+        def edit_during_extraction(index_paths, source_dir):
+            payload = read_json(path)
+            payload["manual_note"] = "new outline metadata"
+            write_json(path, payload)
+            return original(index_paths, source_dir)
+        with patch.object(module, "_source_blocks", side_effect=edit_during_extraction):
+            with self.assertRaisesRegex(ValueError, "过时快照"):
+                self.run_import(apply=True)
+        self.assertEqual(read_json(path)["manual_note"], "new outline metadata")
+        self.assertEqual(read_json(self.project / "requirements.json")["requirements"], [])
+
+    def test_hierarchy_conflict_is_visible_in_preview_not_marked_ready(self):
+        from biaoshu.outline_tree import outline_template, outline_plan, lock_outline
+        self.decide(("accept", "reject"))
+        self.run_import(apply=True)
+        suggestion_tree = self.root / "tree-for-hierarchy.json"
+        write_json(suggestion_tree, outline_template(self.project))
+        outline_plan(self.project, suggestion_tree, apply=True)
+        lock_outline(self.project, confirm=True)
+        self.decide(("accept", "accept"))
+        snapshot = (self.project / "outline.json").read_bytes()
+        preview = self.run_import(apply=False)
+        self.assertEqual(preview["status"], "blocked_hierarchical_outline")
+        self.assertTrue(any("roots" in msg for msg in preview["warnings"]))
+        with self.assertRaisesRegex(ValueError, "已有层级目录"):
+            self.run_import(apply=True)
+        self.assertEqual((self.project / "outline.json").read_bytes(), snapshot)
+
     def test_reviewer_cannot_accept_invalid_score(self):
         data = read_json(self.suggestions)
         data["candidates"][0]["score"] = True
