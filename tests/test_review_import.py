@@ -142,9 +142,21 @@ class ReviewedImportTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "多档评分来源"):
             self.run_import(apply=True)
 
+    def test_out_of_range_ambiguous_grade_is_reviewable_but_not_automatic_score(self):
+        self.set_ambiguous_only()
+        item = read_json(self.suggestions)
+        item["ambiguous_candidates"][0]["score_options"] = [90, 105]
+        write_json(self.suggestions, item)
+        review = review_template(self.suggestions)
+        self.assertEqual(review["ambiguous_decisions"][0]["decision"], "pending")
+        write_json(self.review_path, review)
+        self.assertEqual(self.run_import()["status"], "pending_review")
+        with self.assertRaisesRegex(ValueError, "未处理"):
+            self.run_import(apply=True)
+
     def test_unsupported_suggestion_schema_rejected_before_review(self):
         original = self.suggestions.read_bytes()
-        for version in (None, 2, 999, "1"):
+        for version in (None, True, 1.0, 2, 999, "1"):
             with self.subTest(version=version):
                 data = json.loads(original)
                 if version is None:
