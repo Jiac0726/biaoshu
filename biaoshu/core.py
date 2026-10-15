@@ -65,6 +65,8 @@ def inspect(root: Path, strict: bool = False) -> dict:
     facts = data["facts.json"].get("facts")
     sections = data["outline.json"].get("sections")
     project = data["project.json"]
+    from .outline_tree import validate_outline_state
+    errors.extend(validate_outline_state(root, data["outline.json"]))
     if not all(isinstance(x, list) for x in (requirements, facts, sections)):
         return {"ok": False, "errors": ["requirements、facts、sections 必须为数组"], "warnings": [], "statistics": {}}
     if strict and (not requirements or not sections):
