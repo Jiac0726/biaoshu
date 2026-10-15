@@ -65,6 +65,51 @@ class ScoreCandidatesTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "同名原件"):
             discover_score_candidates([self.index, self.index], self.src)
 
+    def test_multiline_docx_table_tiers_stay_one_ambiguous_review_item(self):
+        from docx import Document
+        from biaoshu.extraction import extract_document
+        table_doc = self.src / "grade-tiers.docx"
+        doc = Document()
+        table = doc.add_table(rows=1, cols=2)
+        table.cell(0, 0).text = "质量保障措施"
+        table.cell(0, 1).text = "合格得5分\n优秀得10分"
+        doc.save(table_doc)
+        index = self.root / "grade.index.json"
+        parsed = extract_document(table_doc).index
+        index.write_text(json.dumps(parsed, ensure_ascii=False), encoding="utf-8")
+        result = discover_score_candidates([index], self.src)
+        self.assertEqual(result["candidates"], [])
+        self.assertEqual(len(result["ambiguous_candidates"]), 1)
+        item = result["ambiguous_candidates"][0]
+        self.assertEqual(item["score_options"], [5.0, 10.0])
+        self.assertEqual(item["evidence"]["location"], "第1表第1行")
+        self.assertIn("优秀得10分", item["evidence"]["quote"])
+
+    def test_table_specific_criterion_not_generic_score_category(self):
+        self.blocks = [{"location": "第1表第2行", "kind": "table_row",
+                        "text": "列1：技术评分 | 列2：实施组织方案 | 列3：10分"}]
+        self.save_index()
+        result = self.parser_only()
+        self.assertEqual([x["title"] for x in result["candidates"]], ["实施组织方案"])
+
+    def test_per_item_penalties_and_bonuses_require_review(self):
+        self.blocks = [
+            {"location": "第2行", "kind": "line", "text": "安全措施每缺一项扣2分"},
+            {"location": "第3行", "kind": "line", "text": "创新方案每提供一项加2分"},
+        ]
+        self.save_index()
+        result = self.parser_only()
+        self.assertFalse(result["candidates"])
+        self.assertEqual([x["reason"] for x in result["ambiguous_candidates"]],
+                         ["adjustment_rule", "adjustment_rule"])
+        self.assertEqual([x["score_options"] for x in result["ambiguous_candidates"]], [[2.0], [2.0]])
+        self.assertEqual([x["status"] for x in result["ambiguous_candidates"]],
+                         ["requires_manual_scoring_review"] * 2)
+
+    def test_normal_single_criterion_remains_direct_suggestion(self):
+        self.assertEqual([x["score"] for x in self.run_discovery()["candidates"]],
+                         [10.0, 15.0])
+
     def test_table_row_preserves_location(self):
         self.blocks = [{"location": "第2表第4行", "kind": "table_row",
                         "text": "列1：实施组织方案 | 列2：10分 | 列3：评审实施方案内容"}]
