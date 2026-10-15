@@ -99,14 +99,16 @@ def _context(state: dict, section: dict, sources: dict[str, dict]) -> tuple[dict
         # presentation field. Dropping it lets AI reinterpret "duration=30日"
         # as project duration instead of the actual service duration.
         category = fact.get("category")
+        generic_duration = fact["key"].strip().lower() in {"duration", "period", "期限", "时长"}
         if category is not None:
-            from .consistency import _LABELS
-            if not isinstance(category, str) or category not in _LABELS:
-                raise ValueError(f"事实 {fact['key']} 的期限 category 非法，不能交给模型猜测")
+            if not isinstance(category, str) or not category.strip():
+                raise ValueError(f"事实 {fact['key']} 的 category 不能为空或非法")
+            if generic_duration and category not in {
+                    "project_duration", "service_duration",
+                    "warranty_duration", "response_time"}:
+                raise ValueError(f"已核实期限事实 {fact['key']} 的 category 不是受支持的期限类别")
             entry["category"] = category
-        if (fact["status"] == "verified"
-                and fact["key"].strip().lower() in {"duration", "period", "期限", "时长"}
-                and not category):
+        if fact["status"] == "verified" and generic_duration and not category:
             raise ValueError(f"已核实的通用期限事实 {fact['key']} 缺少 category，禁止 AI 写作")
         if fact["status"] == "verified":
             entry.update(value=fact["value"], evidence=fact["evidence"])
