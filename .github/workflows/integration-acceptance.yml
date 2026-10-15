@@ -7,6 +7,9 @@ permissions:
 jobs:
   synthetic-release-candidate:
     runs-on: ${{ matrix.os }}
+    env:
+      # GitHub's Windows runner may default to cp1252; CLI output is Chinese.
+      PYTHONIOENCODING: utf-8
     strategy:
       fail-fast: false
       matrix:
