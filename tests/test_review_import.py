@@ -147,6 +147,18 @@ class ReviewedImportTests(unittest.TestCase):
         self.assertEqual([s["id"] for s in read_json(self.project / "outline.json")["sections"]],
                          ["S1", "S2"])
 
+    def test_additional_approval_after_first_import_creates_separate_backup(self):
+        self.decide(("accept", "reject"))
+        first = self.run_import(apply=True)
+        self.decide(("accept", "accept"))
+        second = self.run_import(apply=True)
+        self.assertEqual(first["status"], "applied")
+        self.assertEqual(second["statistics"]["new_requirements"], 1)
+        self.assertNotEqual(first["backup_dir"], second["backup_dir"])
+        self.assertTrue(Path(first["backup_dir"]).exists())
+        self.assertTrue(Path(second["backup_dir"]).exists())
+        self.assertEqual(len(read_json(self.project / "requirements.json")["requirements"]), 2)
+
     def test_second_import_idempotent(self):
         self.decide()
         self.run_import(apply=True)
