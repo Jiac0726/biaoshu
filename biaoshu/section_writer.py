@@ -211,10 +211,8 @@ def write_section(root: Path, section_id: str, index_paths: list[Path], source_d
             from .review_transaction import _atomic_bytes
             _atomic_bytes(destination, mark_bytes)
         else:
-            with destination.open("xb") as stream:
-                stream.write(mark_bytes)
-                stream.flush()
-                os.fsync(stream.fileno())
+            from .review_transaction import atomic_create
+            atomic_create(destination, mark_bytes)
         if destination.read_bytes() != mark_bytes or checkpoint.read_bytes() != checkpoint_bytes:
             raise OSError("章节生成文件写入后校验失败，保留恢复日志")
         journal.unlink()
@@ -249,6 +247,8 @@ def approve_section(root: Path, section_id: str, *, acknowledgement: str) -> dic
         raise ValueError("当前检查点不能审批")
     if meta["status"] == "pending_review" and _digest(current.encode("utf-8")) != meta.get("body_sha256"):
         raise ValueError("AI 草稿在审批前已被修改，必须重新核验写作结果")
+    if meta["status"] == "approved" and _digest(current.encode("utf-8")) != meta.get("body_sha256"):
+        raise ValueError("已批准章节正文发生变化，不能通过再次调用审批来重新签署")
     state = load_project(root)
     section = next((s for s in state["outline.json"]["sections"]
                     if s["id"] == section_id), None)
@@ -257,8 +257,8 @@ def approve_section(root: Path, section_id: str, *, acknowledgement: str) -> dic
     if sorted(section["requirement_ids"]) != meta.get("requirement_ids"):
         raise ValueError("生成后章节关联需求已变更，必须重新核对并生成正文")
     context_sha = review_context_sha256(state)
-    if meta.get("context_sha256") != context_sha and meta["status"] == "pending_review":
-        raise ValueError("生成后正式需求、事实或目录已经变动，禁止批准旧草稿")
+    if meta.get("context_sha256") != context_sha:
+        raise ValueError("生成后正式需求、事实或目录已经变动，禁止审批或重新签署旧内容")
     manifest = meta.get("source_manifest")
     if not isinstance(manifest, list) or not manifest:
         raise ValueError("检查点缺少原文来源指纹，禁止批准未经来源绑定的草稿")

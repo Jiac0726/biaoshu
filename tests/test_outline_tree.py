@@ -187,6 +187,17 @@ class OutlineHierarchyTests(unittest.TestCase):
         names = [p.text for p in doc.paragraphs if p.style.name.startswith("Heading")]
         self.assertEqual(names[:4], ["项目实施与进度", "实施组织", "进度保障", "质量保障"])
 
+    def test_corrupt_locked_section_title_returns_structured_check_error(self):
+        self.proposed(self.grouped())
+        outline_plan(self.root, self.proposal, apply=True)
+        lock_outline(self.root, confirm=True)
+        state = read_json(self.root / "outline.json")
+        state["sections"][2].pop("title")
+        write_json(self.root / "outline.json", state)
+        report = inspect(self.root)
+        self.assertFalse(report["ok"])
+        self.assertTrue(any("标题" in msg for msg in report["errors"]))
+
     def test_legacy_flat_outline_remains_compatible(self):
         self.assertTrue(inspect(self.root)["ok"])
         items = list(walk_outline(read_json(self.root / "outline.json")))

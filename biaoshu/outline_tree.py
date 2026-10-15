@@ -31,7 +31,8 @@ def _members(node: dict) -> list[str]:
 
 def _signature(roots: list[dict], sections: list[dict]) -> list[dict]:
     """Protect every first-level heading, including a root that is a leaf S#."""
-    titles = {section["id"]: section["title"] for section in sections}
+    titles = {section.get("id"): section.get("title")
+              for section in sections if isinstance(section, dict)}
     result = []
     for node in roots:
         if "section_id" in node:
@@ -107,6 +108,12 @@ def validate_outline_state(root: Path, outline: dict) -> list[str]:
     sections = outline.get("sections")
     if not isinstance(sections, list):
         return ["outline.sections 必须是数组"]
+    for idx, section in enumerate(sections):
+        if (not isinstance(section, dict) or not isinstance(section.get("id"), str)
+                or not ID_RE.fullmatch(section["id"])
+                or not isinstance(section.get("title"), str)
+                or not section["title"].strip()):
+            errors.append(f"sections[{idx}] 章节 ID 或标题无效")
     roots = outline.get("roots")
     lock_path = Path(root) / LOCK_FILE
     if roots is not None:

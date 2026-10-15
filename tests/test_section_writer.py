@@ -252,6 +252,51 @@ class SectionWriterTests(unittest.TestCase):
         self.assertFalse(lock.exists())
         self.assertFalse(stage_path(self.project, "S1").exists())
 
+    def test_unapproved_reapproval_cannot_rebind_edited_approved_body(self):
+        self.one()
+        approve_section(self.project, "S1", acknowledgement=CONFIRM)
+        path = self.project / "sections" / "S1.md"
+        original = checkpoint_path(self.project, "S1").read_bytes()
+        path.write_text(path.read_text(encoding="utf-8") + "\n人工追加另一项承诺", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "不能通过再次调用审批"):
+            approve_section(self.project, "S1", acknowledgement=CONFIRM)
+        self.assertEqual(checkpoint_path(self.project, "S1").read_bytes(), original)
+
+    def test_approved_reapproval_cannot_rebind_changed_facts(self):
+        self.one()
+        approve_section(self.project, "S1", acknowledgement=CONFIRM)
+        before = checkpoint_path(self.project, "S1").read_bytes()
+        write_json(self.project / "facts.json", {"facts": [
+            {"key": "deadline", "value": "60日", "status": "pending"},
+        ]})
+        with self.assertRaisesRegex(ValueError, "需求、事实或目录"):
+            approve_section(self.project, "S1", acknowledgement=CONFIRM)
+        self.assertEqual(checkpoint_path(self.project, "S1").read_bytes(), before)
+
+    def test_new_doc_publisher_uses_atomic_exclusive_create(self):
+        from biaoshu import review_transaction
+        original = review_transaction.atomic_create
+        seen = []
+        def wrapper(dest, raw):
+            seen.append(dest)
+            self.assertFalse(dest.exists())
+            return original(dest, raw)
+        with patch.object(review_transaction, "atomic_create", side_effect=wrapper):
+            self.one()
+        self.assertEqual([x.name for x in seen], ["S1.md"])
+
+    def test_concurrent_manual_creation_is_not_overwritten(self):
+        from biaoshu import review_transaction
+        doc = self.project / "sections" / "S1.md"
+        def competitor(dest, raw):
+            dest.write_text("用户同时手工新写的技术方案", encoding="utf-8")
+            raise FileExistsError("the document already exists")
+        with patch.object(review_transaction, "atomic_create", side_effect=competitor):
+            with self.assertRaises(FileExistsError):
+                self.one()
+        self.assertEqual(doc.read_text(encoding="utf-8"), "用户同时手工新写的技术方案")
+        self.assertFalse(inspect(self.project)["ok"])
+
     def test_locked_outline_is_not_mutated_by_generation(self):
         proposal = self.root / "proposal.json"
         write_json(proposal, outline_template(self.project))
