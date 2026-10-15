@@ -275,3 +275,10 @@ python -m biaoshu section-recover ./workspaces/my-bid --section S1 --confirm --u
 历史数据如使用 `facts.json` 中的泛化期限键 `duration` / `period` / `期限` / `时长`，并标记 `verified`，现在需要显式声明 `category` 为 `project_duration`、`service_duration`、`warranty_duration` 或 `response_time`。未声明会返回 `ambiguous_verified_duration` 并阻断严格审核，不会未经事实支持将通用期限擅自对应某一合同义务。
 
 此变更是失败关闭的兼容性变更，旧项目需人工确认期限类型后才能通过正式导出；仍需独立代码审查与合规验收。
+
+## 模型完成状态与审核输出保护（v0.15）
+
+所有调用统一 OpenAI 兼容聊天接口的 AI 招标分析、章节写作和逐项语义审稿，均检查响应的 `finish_reason`。只有 `stop`（或明确支持的 `eos_token`）代表本次消息正常完成；`length`、`tool_calls`、null、缺失或不合法值均拒绝，**即使消息恰好是可解析的 JSON**，也不能被当作经过审核的完整结果。本地不兼容的后端应修复响应协议，不以忽略完成状态绕过检查。
+
+`analyze-ai`、`semantic-review`、`score-candidates`、`review-init`、`outline-init` 的输出现在采取双重保护：在执行模型或分析前拒绝正式项目/审核文件名及已有路径，完成后以同目录临时文件、原子独占创建，不能覆盖旧报告、招标原文、证据索引或项目配置。输出目标已有文件时，请明确指定新路径，不要依赖自动覆盖。这个保护不会让审稿建议自动提升为人工批准。
+
