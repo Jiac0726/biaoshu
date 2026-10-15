@@ -78,11 +78,14 @@ class SectionWriterTests(unittest.TestCase):
         self.assertFalse(inspect(self.project, strict=True)["ok"])
 
     def test_verified_generic_duration_category_is_sent_to_model(self):
+        self.source.write_text(self.source.read_text(encoding="utf-8")
+                               + "服务期限为30日\n", encoding="utf-8")
+        write_json(self.index, extract_document(self.source).index)
         write_json(self.project / "facts.json", {"facts": [{
             "key": "duration", "category": "service_duration",
             "status": "verified", "value": "30日",
-            "evidence": {"file": "tender.txt", "location": "第3行",
-                         "quote": "项目工期为30日"},
+            "evidence": {"file": "tender.txt", "location": "第4行",
+                         "quote": "服务期限为30日"},
         }]})
         inputs = []
         def model(endpoint, model, prompt, *, api_key, timeout, instructions):
