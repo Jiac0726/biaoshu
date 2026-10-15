@@ -290,11 +290,29 @@ def main(argv=None):
             print(f"已恢复审核导入事务：{', '.join(result['restored_files'])}；"
                   f"保留原始备份 {result['backup']}")
         elif args.command == "review-import":
+            # Reject pre-existing/protected report destinations BEFORE mutating
+            # requirements and outline. Exclusive publication still rechecks
+            # after commit to handle another process creating the target.
+            if args.output:
+                validate_new_report_target(args.output)
             plan = reviewed_import(args.project_dir, args.suggestions, args.review,
                                    args.index, args.source_dir, apply=args.apply)
+            report_error = None
             if args.output:
-                write_json(args.output, plan)
-            print(f"{'已登记' if args.apply else '仅预览'}：新增 {plan['statistics']['new_requirements']} 条，"
+                try:
+                    write_new_report(args.output, plan)
+                except (OSError, ValueError) as exc:
+                    if args.apply and plan["status"] == "applied":
+                        # The transaction already committed. Do not report an
+                        # unsuccessful import and prompt a dangerous retry.
+                        report_error = exc
+                    else:
+                        raise
+            if report_error is not None:
+                print(f"警告：正式需求及目录已提交成功，但导入报告未保存至 {args.output}："
+                      f"{report_error}。请检查项目、备份目录和现有报告；不要直接重复导入。",
+                      file=sys.stderr)
+            print(f"{'已登记' if plan['status'] == 'applied' else '仅预览'}：新增 {plan['statistics']['new_requirements']} 条，
                   f"多档待处理 {plan['statistics'].get('ambiguous_pending', 0)} 条，"
                   f"拒绝 {plan['statistics']['rejected']} 条，"
                   f"待审 {plan['statistics']['pending']} 条，"
