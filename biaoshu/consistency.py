@@ -128,13 +128,21 @@ def analyze_consistency(root: Path, state: dict | None = None) -> dict:
         if not path.is_file():
             continue
         inspected += 1
-        in_code = False
+        fence_char, fence_length = None, 0
         for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
             trimmed = line.strip()
-            if trimmed.startswith((chr(96) * 3, "~" * 3)):
-                in_code = not in_code
+            fence = re.match(r"^(`{3,}|~{3,})(.*)$", trimmed)
+            if fence_char is None:
+                if fence:
+                    fence_char, fence_length = fence.group(1)[0], len(fence.group(1))
+                    continue
+            else:
+                if (fence and fence.group(1)[0] == fence_char
+                        and len(fence.group(1)) >= fence_length
+                        and not fence.group(2).strip()):
+                    fence_char, fence_length = None, 0
                 continue
-            if in_code or not trimmed or trimmed.startswith((">", "#", "|")):
+            if not trimmed or trimmed.startswith((">", "#", "|")):
                 continue
             # Inline Markdown emphasis is not a change of contractual meaning.
             visible = re.sub(r"\*\*|__", "", line)
@@ -158,9 +166,14 @@ def analyze_consistency(root: Path, state: dict | None = None) -> dict:
                     continue
                 cat = _category(match.group("label"))
                 value, unit = _quantity(match.group("value"), match.group("unit"))
+                # Preserve the offending clause even deep into a long
+                # paragraph. The surrounding text helps a reviewer locate it.
+                start = max(0, match.start() - 70)
+                end = min(len(visible), match.end() + 70)
+                excerpt = visible[start:end].strip()
                 observations.append({
                     "category": cat, "section_id": sid, "line": number,
-                    "value": value, "unit": unit, "excerpt": trimmed[:180],
+                    "value": value, "unit": unit, "excerpt": excerpt,
                 })
     findings: list[dict] = list(mapping_findings)
     grouped: dict[tuple[str, str], list[dict]] = defaultdict(list)

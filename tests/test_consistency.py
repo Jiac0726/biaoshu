@@ -197,6 +197,37 @@ class ConsistencyTests(unittest.TestCase):
                   "\n工期为45日\n" + chr(96) * 3 + "\n")
         self.assertTrue(analyze_consistency(self.root)["ok"])
 
+    def test_tilde_fence_does_not_create_false_conflict(self):
+        self.body("S1", "项目工期为30日。\n~~~python\n项目工期为45日\n~~~\n")
+        report = analyze_consistency(self.root)
+        self.assertTrue(report["ok"])
+        self.assertEqual(report["statistics"]["commitments_detected"], 2)
+
+    def test_mismatched_fence_does_not_close_code_block(self):
+        self.body("S1", "项目工期为30日。\n~~~~text\n工期为45日\n~~~\n工期为60日\n~~~~\n")
+        report = analyze_consistency(self.root)
+        self.assertTrue(report["ok"])
+        self.assertEqual(report["statistics"]["commitments_detected"], 2)
+
+    def test_fence_language_and_trailing_content_do_not_close_fence(self):
+        self.body("S1", "项目工期为30日。\n~~~json\n工期为45日\n~~~notclose\n工期为60日\n~~~\n")
+        report = analyze_consistency(self.root)
+        self.assertTrue(report["ok"])
+        self.assertEqual(report["statistics"]["commitments_detected"], 2)
+
+    def test_long_paragraph_excerpt_contains_actual_conflicting_value(self):
+        long_prefix = "项目安排按相关约定开展实施复核。" * 21
+        self.body("S2", long_prefix + "合同工期为45日，随后完成质量验收。")
+        report = analyze_consistency(self.root)
+        clash = next(f for f in report["findings"]
+                     if f["code"] == "cross_section_conflict")
+        excerpt = next(x["excerpt"] for x in clash["observations"]
+                       if x["section_id"] == "S2")
+        self.assertIn("合同工期为45日", excerpt)
+        self.assertLessEqual(len(excerpt), 160)
+        self.assertNotEqual(excerpt, long_prefix[:160])
+        self.assertFalse(inspect(self.root, strict=True)["ok"])
+
     def test_cli_writes_a_local_report_without_modifying_source(self):
         self.body("S2", "项目工期为45日。")
         dest = self.root / "reports" / "consistency.json"
