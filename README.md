@@ -262,3 +262,7 @@ python -m biaoshu section-recover ./workspaces/my-bid --section S1 --confirm --u
 `score-candidates` 输出的 `ambiguous_candidates` 不等于忽略的条款：`review-init` 会建立对应 `ambiguous_decisions`，默认 `pending`。只要有未处理的多档项目，`review-import --apply` 就会拒绝导入。人工可以填写 `not_applicable`（需至少 12 字原因），或先在 `requirements.json` 中完整登记对应原文证据，再选择 `manually_registered`。系统会检验该证据确实存在；不能仅凭口头确认自动漏掉多档评分。
 
 目录锁会对一级章节标题损坏返回明确错误；AI 已批准章节的正文/事实变化不能通过再次运行批准命令重签。新建 AI 正文使用先写临时文件、再原子创建目标路径的方式，避免残留半写入文件。
+
+## 离线 Release Candidate 集成验收
+
+建立在 PR #12 已测试快照上的独立 `release/rc-integration-validation-20261015` 分支提供可重复执行的 `python scripts/validate_release_candidate.py`，依次核验全部 unittest、虚构标书端到端 Word 生成和 CLI 启动。详见 [验收清单](docs/release-candidate-20261015.md)。这并非真实模型质量测试，也不表示 PR 已获独立批准或合并主分支。
