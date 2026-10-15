@@ -255,3 +255,7 @@ python -m biaoshu section-recover ./workspaces/my-bid --section S1 --confirm --u
 ```
 
 恢复动作回退本轮写入的 Markdown 与审核 checkpoint 两份文件，再允许重新生成草稿；绝不替代人工确认。日志缺失而仅有残留锁时不会自动删除锁，需人工检查进程和工作区。以上属于失败检测/保守回退，不是多文件硬件原子事务。
+
+## 离线 Release Candidate 集成验收
+
+建立在 PR #12 已测试快照上的独立 `release/rc-integration-validation-20261015` 分支提供可重复执行的 `python scripts/validate_release_candidate.py`，依次核验全部 unittest、虚构标书端到端 Word 生成和 CLI 启动。详见 [验收清单](docs/release-candidate-20261015.md)。这并非真实模型质量测试，也不表示 PR 已获独立批准或合并主分支。
