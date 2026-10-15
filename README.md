@@ -191,3 +191,22 @@ python -m biaoshu audit ./workspaces/my-bid --index ./workspaces/my-bid/tender-e
 ## 跨模块脱敏端到端验收
 
 新增 `tests/test_pipeline_e2e.py`：完全使用虚构 TXT 与模拟模型，实际调用 `init/extract/score-candidates/analyze-ai/review-init/review-import/outline-init/outline-plan/outline-lock/allocate/scaffold/write-sections/approve-section/consistency-audit/audit/export` 等生产 CLI，并验证真实 DOCX 生成及失败恢复。详见 [验收说明](docs/e2e-acceptance.md)。本测试**不表示人工已审稿或真实投标项目已验收**。
+
+
+## 技术评分项到正文原句的追溯台账（v0.9）
+
+完成章节写作、审核并确认正文稳定后，可将每一个评分要求与实际响应原句建立**人工逐条复核**的定位记录：
+
+```bash
+python -m biaoshu trace-init ./workspaces/my-bid
+# 由审稿人在 reports/response-trace.json 为每条需求→章节映射填写：
+# line（正文行号，从1开始）、quote（该行实际响应原句，长度至少12字符）、decision=confirmed。
+# 审稿人亲自填写 acknowledgement：
+# 我已逐项核对评分要求和正文段落，并确认上述定位引用为实际技术响应
+python -m biaoshu trace-audit ./workspaces/my-bid --output ./workspaces/my-bid/reports/trace-audit.json
+python -m biaoshu audit ./workspaces/my-bid --index ./workspaces/my-bid/tender-extracted.index.json --source-dir ./sources
+```
+
+trace-init 不会覆盖已有审核台账，初始全部 pending；trace-audit 只读检查每个要求的章节映射、Markdown 行号、逐字原句、正文 SHA-256，以及明确人工确认。不能把标题、表格引用、引文块或过短片段当成有效响应。对需求标题、章节映射和正文修改均要求重新审核。
+
+为兼容之前的本地项目，**未启用追溯台账时** strict audit 仍可运行，但会明确警告“尚未建立正文追溯”；**启用台账后**，尚未人工确认、遗漏关系、正文变化或无效定位将使严格 audit 和非草稿 export 失败。追溯通过只说明引用位置存在且操作者声称已核实，不证明实际满足评分条款、没有遗漏专业义务或已经完成法律合规审核。
