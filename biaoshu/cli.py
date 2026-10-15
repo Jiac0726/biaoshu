@@ -20,7 +20,7 @@ from .section_transaction import recover as recover_section
 from .consistency import analyze_consistency
 from .response_trace import create_trace, audit_trace
 from .semantic_review import review_responses
-from .safe_report import write_new_report
+from .safe_report import write_new_report, validate_new_report_target
 
 
 def extract_source(source: Path) -> str:
@@ -198,6 +198,11 @@ def main(argv=None):
                                  help="只在确认原写作进程已停止时解除残留锁")
     args = parser.parse_args(argv)
     try:
+        if args.command in ("semantic-review", "analyze-ai", "score-candidates",
+                            "review-init", "outline-init"):
+            # Fail before model calls, and use atomic exclusive publishing
+            # after the model returns to close the check/write race.
+            validate_new_report_target(args.output)
         if args.command == "init":
             initialize(args.project_dir)
             print(f"已初始化：{args.project_dir}")
