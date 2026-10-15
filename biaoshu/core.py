@@ -1,6 +1,7 @@
 """项目数据模型、结构校验、篇幅分配和机械审计。不调用模型，不编造业务事实。"""
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import re
@@ -108,6 +109,18 @@ def inspect(root: Path, strict: bool = False) -> dict:
                 errors.append(f"{sid} 正文文件不存在：sections/{sid}.md")
             else:
                 body = p.read_text(encoding="utf-8")
+                # A model-written draft cannot silently pass strict audit or official export.
+                checkpoint = root / "reports" / "section-writing" / (sid + ".json")
+                if checkpoint.exists():
+                    try:
+                        meta = read_json(checkpoint)
+                        if (not isinstance(meta, dict) or meta.get("section_id") != sid
+                                or meta.get("status") != "approved"):
+                            errors.append(f"{sid} AI 章节尚未经人工确认")
+                        elif meta.get("body_sha256") != hashlib.sha256(p.read_bytes()).hexdigest():
+                            errors.append(f"{sid} 审核后正文已更改，需要重新人工确认")
+                    except (OSError, ValueError, TypeError):
+                        errors.append(f"{sid} 写作检查点无法读取")
                 actual = words(body)
                 if not body.strip() or "TODO" in body.upper() or "待撰写" in body:
                     errors.append(f"{sid} 正文未完成或包含占位符")

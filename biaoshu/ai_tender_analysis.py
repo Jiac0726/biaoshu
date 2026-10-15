@@ -63,10 +63,11 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 def _request_model(endpoint: str, model: str, prompt: str, *,
-                   api_key: str | None, timeout: float) -> str:
+                   api_key: str | None, timeout: float,
+                   instructions: str = _INSTRUCTIONS) -> str:
     body = {
         "model": model,
-        "messages": [{"role": "system", "content": _INSTRUCTIONS},
+        "messages": [{"role": "system", "content": instructions},
                      {"role": "user", "content": prompt}],
         "temperature": 0,
         "response_format": {"type": "json_object"},

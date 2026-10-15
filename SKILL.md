@@ -124,3 +124,10 @@ Python 3.10+。在本仓库目录运行：
 ## 目录树编辑与一级结构保护
 
 经过审核登记的 outline.json 默认保留 S# 平面叶子，可用 outline-init 生成候选树，再由审稿人组织为根组与叶子节点。outline-plan 默认预览，--apply 才写入；不得凭模型未审核建议修改 S# ID 或对应正文。outline-lock --confirm 仅在用户明确确认一级目录结构后使用。锁定后，一级目录标题、顺序和章节归属不可擅自更改，下级组织可在同一级组的章节点范围内调整。check/audit/export 必须验证目录层级完整性和锁文件。见 references/outline-planning.md。
+
+
+## AI 分节撰写与检查点门禁
+
+运行 write-sections --index <原件索引> --source-dir <原件目录> --model <模型> [--section S#]，模型只能读取当前章节关联评分要求的已索引证据、verified 事实和兄弟章节标题。pending / not_specified 的值不交给模型。程序检查正文格式、所有关联评分项 ID 的覆盖申明及事实键有效性，但这只是机械门禁，不能替代审稿。
+
+章节以 S# 独立保存，原有人工正文和任意已有非占位草稿不可覆盖；失败后仅处理尚未写入章节。reports/section-writing/<S#>.json 保存模型、内容指纹和审核状态。每节必须由真实审稿人核对原文、具体承诺后明确执行 approve-section，并填写完整确认语句。未批准章节或批准后正文发生更改时，audit/正式 export 均拒绝；必要时重新逐项审核后再批准。
