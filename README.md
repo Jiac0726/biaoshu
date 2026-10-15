@@ -225,3 +225,8 @@ python -m biaoshu semantic-review ./workspaces/my-bid --index ./workspaces/my-bi
 审稿结果是 `suggestions_only`，按每个 `requirement_id + section_id + section_line` 列出 `adequate/partial/missing/uncertain`、风险级别、原因、修订建议、真实原文和正文引文，并逐一标记 `pending_human_review`。模块在调用前验证原件 SHA-256、重新解析索引并检查已确认响应台账；验证生成的双侧引文确实来自提供给模型的原句，调用后再次检查台账、正文和招标原件未变化。**不会自动批准、重写或覆盖任何项目正文；已有报告禁止覆盖。**
 
 该能力是逐项**局部段落**语义建议，不会独立检查全文评分完整性、综合档次和合规性；即使模型判定 adequate，也绝不意味着该评分项已通过专业审核。
+
+
+## PR #1—#10 集成准备审查
+
+在合并到 main 之前，请先阅读 [集成准备与高风险阻断清单](docs/integration-readiness-20261015.md)。已确认旧 PR 虽 CI 通过、无 Git 冲突，仍有 P1/P2 自动审查问题；当前加固分支解决来源索引伪造、本地模型环境代理、未批准草稿和部分合同期限边界问题。**尚未获得独立 Approved 审查，不应直接用于生产或正式投标。**
