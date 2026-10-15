@@ -186,3 +186,8 @@ python -m biaoshu audit ./workspaces/my-bid --index ./workspaces/my-bid/tender-e
 报告包含逐条冲突的章节 ID、行号、原句、数值与单位，也会将相同字段与 facts.json 中已核实的唯一基线值核对。未确认事实出现确定性承诺时标记 warning。普通 check 只警告，严格 audit 和正式 export 会阻断同单位下明确矛盾；草稿导出仍须明确标识未校验状态。扫描只读取本地章节，不请求远程服务也不会自动改写正文。
 
 本工具仅对这四种带明确单位的等式型承诺做保守文字核对，不比较不同单位或专业条件、上下限，不保证发现所有项目事实与评分项漏写，不替代独立语义审稿、合规审核与人工终审。
+
+
+## 跨模块脱敏端到端验收
+
+新增 `tests/test_pipeline_e2e.py`：完全使用虚构 TXT 与模拟模型，实际调用 `init/extract/score-candidates/analyze-ai/review-init/review-import/outline-init/outline-plan/outline-lock/allocate/scaffold/write-sections/approve-section/consistency-audit/audit/export` 等生产 CLI，并验证真实 DOCX 生成及失败恢复。详见 [验收说明](docs/e2e-acceptance.md)。本测试**不表示人工已审稿或真实投标项目已验收**。
