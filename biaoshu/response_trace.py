@@ -171,9 +171,14 @@ def audit_trace(root: Path) -> dict:
             issue("invalid_location", f"原文只有 {len(lines)} 行，不存在第 {line} 行", rid, sid)
             continue
         actual = lines[line - 1].strip()
-        # A title, blockquote, table/code line, or mere snippet from the tender
-        # should never qualify as confirmed *response prose*.
-        if not actual or actual.startswith(("#", ">", "|", chr(96) * 3)):
+        # Exclude both the fence markers and every line inside a fenced block.
+        # A snippet of source/code is not a bid response paragraph.
+        in_code = False
+        for previous in lines[:line]:
+            if previous.strip().startswith((chr(96) * 3, "~" * 3)):
+                in_code = not in_code
+        if (not actual or actual.startswith(("#", ">", "|", chr(96) * 3, "~" * 3))
+                or in_code):
             issue("non_prose_evidence", "引用位置不是正文响应段落", rid, sid)
             continue
         if quote.strip() not in actual:
