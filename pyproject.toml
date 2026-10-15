@@ -17,3 +17,6 @@ biaoshu = "biaoshu.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["biaoshu*"]
+
+[tool.setuptools.package-data]
+biaoshu = ["webui/*.html", "webui/*.js", "webui/*.css"]
