@@ -240,3 +240,25 @@ python -m biaoshu review-recover ./workspaces/my-bid --confirm
 ```
 
 恢复命令仅当现存两个文件均与日志中的更新前/更新后指纹一致、且备份可核验时，才回退至事务开始前状态；检测到人工或其它程序修改即拒绝覆盖，保留日志供手工处理。恢复后的旧审核决策可重新预览，但已留下的历史备份不会自动删除，以防冲销审计证据。此机制用于中断后的可检测与恢复，并不保证两文件在任意外部进程读取时瞬间一致。
+
+## 集成候选阶段：三项阻断修复（2026-10-15）
+
+- 评分项多档分数（如“合格 5 分、优秀 10 分”）现在在 `score-candidates` JSON 的 `ambiguous_candidates` 中保存真实原文位置、数值选项和人工待审状态，不再静默漏掉，也不生成可直接批准的单一 score。
+- 一级目录锁现在包括 **root 直接叶子章节的标题**；锁定后直接编辑对应 section 的 title 会导致 `check/audit/export` 校验失败。旧式缺少该标题的一级目录锁需要审核后重新建立，禁止无声放行。
+- AI 章节生成采用 `reports/section-writing/S#.transaction.json` 写前日志；即使两文件写入中途崩溃，项目审计与正式导出都会拦截。检查恢复前后的字节指纹，拒绝覆盖未知人工编辑。
+
+```bash
+# 在确认 AI 写作进程已退出、事务确实中断后恢复章节：
+python -m biaoshu section-recover ./workspaces/my-bid --section S1 --confirm
+# 如进程异常退出并遗留 .write.lock，先确认无进程仍在写，再显式：
+python -m biaoshu section-recover ./workspaces/my-bid --section S1 --confirm --unlock-stale
+```
+
+恢复动作回退本轮写入的 Markdown 与审核 checkpoint 两份文件，再允许重新生成草稿；绝不替代人工确认。日志缺失而仅有残留锁时不会自动删除锁，需人工检查进程和工作区。以上属于失败检测/保守回退，不是多文件硬件原子事务。
+
+
+## 评分多档结果必须审核（P1 修复）
+
+`score-candidates` 输出的 `ambiguous_candidates` 不等于忽略的条款：`review-init` 会建立对应 `ambiguous_decisions`，默认 `pending`。只要有未处理的多档项目，`review-import --apply` 就会拒绝导入。人工可以填写 `not_applicable`（需至少 12 字原因），或先在 `requirements.json` 中完整登记对应原文证据，再选择 `manually_registered`。系统会检验该证据确实存在；不能仅凭口头确认自动漏掉多档评分。
+
+目录锁会对一级章节标题损坏返回明确错误；AI 已批准章节的正文/事实变化不能通过再次运行批准命令重签。新建 AI 正文使用先写临时文件、再原子创建目标路径的方式，避免残留半写入文件。

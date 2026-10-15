@@ -29,12 +29,16 @@ def _members(node: dict) -> list[str]:
     return result
 
 
-def _signature(roots: list[dict]) -> list[dict]:
-    """Protect root order, names and membership but allow lower-level rearrangement."""
+def _signature(roots: list[dict], sections: list[dict]) -> list[dict]:
+    """Protect every first-level heading, including a root that is a leaf S#."""
+    titles = {section.get("id"): section.get("title")
+              for section in sections if isinstance(section, dict)}
     result = []
     for node in roots:
         if "section_id" in node:
-            result.append({"type": "section", "section_id": node["section_id"]})
+            sid = node["section_id"]
+            result.append({"type": "section", "section_id": sid,
+                           "title": titles[sid]})
         else:
             result.append({"type": "group", "id": node["id"], "title": node["title"],
                            "members": sorted(_members(node))})
@@ -104,6 +108,12 @@ def validate_outline_state(root: Path, outline: dict) -> list[str]:
     sections = outline.get("sections")
     if not isinstance(sections, list):
         return ["outline.sections 必须是数组"]
+    for idx, section in enumerate(sections):
+        if (not isinstance(section, dict) or not isinstance(section.get("id"), str)
+                or not ID_RE.fullmatch(section["id"])
+                or not isinstance(section.get("title"), str)
+                or not section["title"].strip()):
+            errors.append(f"sections[{idx}] 章节 ID 或标题无效")
     roots = outline.get("roots")
     lock_path = Path(root) / LOCK_FILE
     if roots is not None:
@@ -120,7 +130,7 @@ def validate_outline_state(root: Path, outline: dict) -> list[str]:
             errors.append("目录锁文件无效或校验信息被修改")
         elif roots is None or errors:
             errors.append("已锁定项目必须保留有效的目录树")
-        elif _signature(roots) != lock["root_signature"]:
+        elif _signature(roots, sections) != lock["root_signature"]:
             errors.append("一级目录已被修改（标题、顺序或归属），与已确认目录锁不一致")
     return errors
 
@@ -165,7 +175,7 @@ def outline_plan(root: Path, proposal_path: Path, *, apply: bool = False) -> dic
     if errs:
         raise ValueError("目录候选校验失败：" + "; ".join(errs))
     lock_path = root / LOCK_FILE
-    if lock_path.exists() and _signature(proposed_roots) != _signature(outline["roots"]):
+    if lock_path.exists() and _signature(proposed_roots, outline["sections"]) != _signature(outline["roots"], outline["sections"]):
         raise ValueError("一级目录已锁定，不能修改其标题、顺序或章节归属")
     plan = {"status": "preview", "root_count": len(proposed_roots),
             "section_count": len(outline["sections"]),
@@ -201,7 +211,7 @@ def lock_outline(root: Path, *, confirm: bool = False) -> dict:
     errors = validate_outline_state(root, outline)
     if errors:
         raise ValueError("当前目录/目录锁不合法：" + "; ".join(errors))
-    signature = _signature(roots)
+    signature = _signature(roots, outline["sections"])
     result = {"schema_version": 1, "root_signature": signature,
               "sha256": _hash(signature)}
     dest = root / LOCK_FILE

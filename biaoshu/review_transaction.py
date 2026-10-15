@@ -58,6 +58,24 @@ def _atomic_bytes(dest: Path, raw: bytes) -> None:
         Path(name).unlink(missing_ok=True)
 
 
+def atomic_create(dest: Path, raw: bytes) -> None:
+    """Atomically publish new bytes without replacing a pre-existing file.
+
+    A direct open('xb') creates a potentially partial document if killed. Stage
+    and fsync the full body before linking it to the final pathname. The hard
+    link operation fails if another writer created the target in the meantime.
+    """
+    fd, name = tempfile.mkstemp(prefix=".section-staged-", suffix=".tmp", dir=str(dest.parent))
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(raw)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.link(name, dest)
+    finally:
+        Path(name).unlink(missing_ok=True)
+
+
 def _save_journal(path: Path, data: dict) -> None:
     from .core import write_json
     if path.exists():

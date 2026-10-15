@@ -13,6 +13,7 @@ from .evidence import verify_evidence
 from .extraction import extract_document
 from .outline_tree import walk_outline
 from .score_candidates import _source_index
+from .section_transaction import stage, stage_path
 
 BANNER = "> AI生成草稿（待人工审查）"
 CONFIRM = "我已逐项核对本节事实、招标响应和承诺，并批准该正文"
@@ -150,6 +151,8 @@ def write_section(root: Path, section_id: str, index_paths: list[Path], source_d
     except FileExistsError as exc:
         raise ValueError(f"章节 {section_id} 已有写入锁，可能正在执行") from exc
     try:
+        if stage_path(root, section_id).exists():
+            raise ValueError("上一轮章节写作中断，必须先执行 section-recover")
         if _content_status(destination, section) == "existing":
             return {"section_id": section_id, "status": "skipped_existing"}
         structure = inspect(root)
@@ -186,7 +189,7 @@ def write_section(root: Path, section_id: str, index_paths: list[Path], source_d
             raise ValueError("生成期间正文被更改，拒绝覆盖人工内容")
         markdown = f"# {section['title']}\n\n{BANNER}\n\n{body}\n"
         checkpoint = checkpoint_path(root, section_id)
-        write_json(checkpoint, {
+        metadata = {
             "schema_version": 1, "section_id": section_id,
             "status": "pending_review", "body_sha256": _digest(markdown.encode("utf-8")),
             "model": model.strip(), "requirement_ids": sorted(req_ids),
@@ -197,16 +200,27 @@ def write_section(root: Path, section_id: str, index_paths: list[Path], source_d
                 for name, idx in sorted(sources.items())
             ],
             "note": "AI 草稿必须经过人工逐项审核，不能视为正式投标内容",
-        })
+        }
+        mark_bytes = markdown.encode("utf-8")
+        checkpoint_bytes = (json.dumps(metadata, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+        journal = stage(root, section_id, mark_bytes, checkpoint_bytes)
+        # The marker is durable before either file changes. A mid-write crash
+        # blocks audit and must be resolved by an explicit reviewed rollback.
+        write_json(checkpoint, metadata)
         if destination.exists():
-            destination.write_text(markdown, encoding="utf-8")
+            from .review_transaction import _atomic_bytes
+            _atomic_bytes(destination, mark_bytes)
         else:
-            with destination.open("x", encoding="utf-8") as stream:
-                stream.write(markdown)
+            from .review_transaction import atomic_create
+            atomic_create(destination, mark_bytes)
+        if destination.read_bytes() != mark_bytes or checkpoint.read_bytes() != checkpoint_bytes:
+            raise OSError("章节生成文件写入后校验失败，保留恢复日志")
+        journal.unlink()
         return {"section_id": section_id, "status": "pending_review",
                 "checkpoint": str(checkpoint)}
     except Exception as exc:
-        if _content_status(destination, section) in {"missing", "placeholder"}:
+        if (not stage_path(root, section_id).exists()
+                and _content_status(destination, section) in {"missing", "placeholder"}):
             write_json(checkpoint_path(root, section_id), {
                 "schema_version": 1, "section_id": section_id,
                 "status": "failed", "error_type": type(exc).__name__,
@@ -223,6 +237,8 @@ def approve_section(root: Path, section_id: str, *, acknowledgement: str) -> dic
     if acknowledgement != CONFIRM:
         raise ValueError("未明确确认当前章节已经逐项审核")
     checkpoint = checkpoint_path(root, section_id)
+    if stage_path(root, section_id).exists():
+        raise ValueError("章节写作事务未完成，禁止批准；请先执行 section-recover")
     if not checkpoint.is_file() or not dest.is_file():
         raise ValueError("没有可审批的 AI 章节或检查点")
     meta = json.loads(checkpoint.read_text(encoding="utf-8"))
@@ -231,6 +247,8 @@ def approve_section(root: Path, section_id: str, *, acknowledgement: str) -> dic
         raise ValueError("当前检查点不能审批")
     if meta["status"] == "pending_review" and _digest(current.encode("utf-8")) != meta.get("body_sha256"):
         raise ValueError("AI 草稿在审批前已被修改，必须重新核验写作结果")
+    if meta["status"] == "approved" and _digest(current.encode("utf-8")) != meta.get("body_sha256"):
+        raise ValueError("已批准章节正文发生变化，不能通过再次调用审批来重新签署")
     state = load_project(root)
     section = next((s for s in state["outline.json"]["sections"]
                     if s["id"] == section_id), None)
@@ -239,8 +257,8 @@ def approve_section(root: Path, section_id: str, *, acknowledgement: str) -> dic
     if sorted(section["requirement_ids"]) != meta.get("requirement_ids"):
         raise ValueError("生成后章节关联需求已变更，必须重新核对并生成正文")
     context_sha = review_context_sha256(state)
-    if meta.get("context_sha256") != context_sha and meta["status"] == "pending_review":
-        raise ValueError("生成后正式需求、事实或目录已经变动，禁止批准旧草稿")
+    if meta.get("context_sha256") != context_sha:
+        raise ValueError("生成后正式需求、事实或目录已经变动，禁止审批或重新签署旧内容")
     manifest = meta.get("source_manifest")
     if not isinstance(manifest, list) or not manifest:
         raise ValueError("检查点缺少原文来源指纹，禁止批准未经来源绑定的草稿")

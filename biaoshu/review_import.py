@@ -39,9 +39,52 @@ def _read_suggestions(path: Path) -> list[dict]:
     return data["candidates"]
 
 
+def _ambiguous_candidates(suggestions_path: Path, candidates: list[dict]) -> list[dict]:
+    source = read_json(suggestions_path)
+    ambiguous = source.get("ambiguous_candidates", [])
+    if not isinstance(ambiguous, list):
+        raise ValueError("多档评分待审核项必须是数组")
+    ids = {item["id"] for item in candidates}
+    for item in ambiguous:
+        if (not isinstance(item, dict)
+                or not isinstance(item.get("id"), str)
+                or not ID_RE.fullmatch(item["id"]) or item["id"] in ids
+                or item.get("status") != "requires_manual_scoring_review"
+                or not isinstance(item.get("score_options"), list)
+                or len(item["score_options"]) < 2
+                or not isinstance(item.get("evidence"), dict)
+                or any(not isinstance(item["evidence"].get(key), str)
+                       or not item["evidence"][key].strip()
+                       for key in ("file", "location", "quote"))):
+            raise ValueError("多档评分项目结构或 ID 不合法")
+        ids.add(item["id"])
+    return ambiguous
+
+
+def _ambiguous_decisions(review: dict, ambiguous: list[dict]) -> dict[str, str]:
+    submitted = review.get("ambiguous_decisions", [])
+    if not isinstance(submitted, list):
+        raise ValueError("多档评分审核清单不合法")
+    by_id = {}
+    for row in submitted:
+        if (not isinstance(row, dict) or set(row) != {"id", "decision", "reason"}
+                or not isinstance(row["id"], str)
+                or not isinstance(row["reason"], str)
+                or row["decision"] not in {"pending", "not_applicable", "manually_registered"}
+                or row["id"] in by_id):
+            raise ValueError("多档评分审核决定不合法、缺失原因或重复")
+        if row["decision"] != "pending" and len(row["reason"].strip()) < 12:
+            raise ValueError("排除或人工登记多档评分必须给出至少12字审核理由")
+        by_id[row["id"]] = row["decision"]
+    if set(by_id) != {item["id"] for item in ambiguous}:
+        raise ValueError("多档评分必须逐项审核，不能遗漏或伪造其他项目")
+    return by_id
+
+
 def review_template(suggestions_path: Path) -> dict:
     items = _read_suggestions(suggestions_path)
-    return {
+    ambiguous = _ambiguous_candidates(suggestions_path, items)
+    result = {
         "schema_version": 1,
         "suggestions_sha256": _digest(suggestions_path),
         "acknowledgement": "",
@@ -49,6 +92,12 @@ def review_template(suggestions_path: Path) -> dict:
             {"id": item["id"], "decision": "pending"} for item in items
         ],
     }
+    if ambiguous:
+        result["ambiguous_decisions"] = [
+            {"id": item["id"], "decision": "pending", "reason": ""}
+            for item in ambiguous
+        ]
+    return result
 
 
 def _check_review(review: dict, candidates: list[dict], digest: str) -> dict[str, str]:
@@ -145,9 +194,12 @@ def _reviewed_import_impl(project_dir: Path, suggestions_path: Path, review_path
     project_dir = Path(project_dir)
     suggestions_path, review_path = Path(suggestions_path), Path(review_path)
     candidates = _read_suggestions(suggestions_path)
+    ambiguous = _ambiguous_candidates(suggestions_path, candidates)
     review = read_json(review_path)
     choices = _check_review(review, candidates, _digest(suggestions_path))
+    ambiguous_choices = _ambiguous_decisions(review, ambiguous)
     unresolved = [key for key, value in choices.items() if value == "pending"]
+    unresolved += [key for key, value in ambiguous_choices.items() if value == "pending"]
     if apply and unresolved:
         raise ValueError(f"存在 {len(unresolved)} 条未处理候选，禁止登记")
     if apply and review.get("acknowledgement") != ACKNOWLEDGEMENT:
@@ -165,6 +217,15 @@ def _reviewed_import_impl(project_dir: Path, suggestions_path: Path, review_path
     existing = {(r["evidence"]["file"], r["evidence"]["location"], _normalize(r["evidence"]["quote"])): r
                 for r in reqs}
     blocks = _source_blocks(index_paths, Path(source_dir))
+    for item in ambiguous:
+        ev = item["evidence"]
+        text = blocks.get((ev["file"], ev["location"]), [])
+        if not any(_normalize(ev["quote"]) in _normalize(line) for line in text):
+            raise ValueError(f"{item['id']} 多档评分来源与招标原文不一致")
+        if ambiguous_choices[item["id"]] == "manually_registered":
+            needle = (ev["file"], ev["location"], _normalize(ev["quote"]))
+            if needle not in existing:
+                raise ValueError(f"{item['id']} 声明已经人工登记，但项目需求不存在对应原文证据")
     additions, new_sections, duplicates = [], [], []
     for candidate in candidates:
         if choices[candidate["id"]] != "accept":
@@ -198,7 +259,16 @@ def _reviewed_import_impl(project_dir: Path, suggestions_path: Path, review_path
             "statistics": {"accepted": sum(x == "accept" for x in choices.values()),
                            "rejected": sum(x == "reject" for x in choices.values()),
                            "pending": len(unresolved), "duplicate": len(duplicates),
-                           "new_requirements": len(additions)},
+                           "new_requirements": len(additions),
+            "ambiguous_total": len(ambiguous),
+            "ambiguous_pending": sum(x == "pending" for x in ambiguous_choices.values()),
+            "ambiguous_manually_registered": sum(
+                x == "manually_registered" for x in ambiguous_choices.values())},
+            "ambiguous_reviews": [
+                {"id": item["id"], "decision": ambiguous_choices[item["id"]],
+                 "evidence": item["evidence"]}
+                for item in ambiguous
+            ],
             "new_requirements": additions, "new_sections": new_sections,
             "duplicates": duplicates,
             "warnings": ["结构及引文匹配不代表已经完成招标专业和合规审查。"]}
