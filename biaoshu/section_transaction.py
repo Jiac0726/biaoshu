@@ -20,6 +20,7 @@ def _hash(raw: bytes) -> str:
 
 
 def stage_path(root: Path, sid: str) -> Path:
+    section_path(Path(root), sid)  # Reject traversal or malformed CLI IDs first.
     return Path(root) / "reports" / "section-writing" / (sid + ".transaction.json")
 
 
