@@ -114,3 +114,8 @@ Python 3.10+。在本仓库目录运行：
 ### 可选本地 AI 招标分析
 
 如用户明确授权使用某个已启动的本地模型，可运行 `python -m biaoshu analyze-ai --index ... --source-dir ... --model ... --output ...`（默认只允许 loopback 地址）。远程模型默认禁止；只有在用户明确授权真实招标资料外发且理解数据处理政策后，才可使用 `--allow-remote`。所有 AI 候选均为 `pending_review`，必须逐项核对原文、纠正分类及补全遗漏；未经核准不能自动写入 requirements.json。见 README。
+
+
+## 人工审核和需求登记门禁
+
+用 review-init 为评分建议生成独立 review.json；由人逐项确认 accept/reject，并亲自填写原文已核对 acknowledgement。不得由 Agent 冒充审稿人员确认。review-import 默认预览，明确添加 --apply 后才可写入 requirements.json 与 outline.json。必须提供原始招标文件和证据索引，登记前将重新解析原件并验证索引/引文。评分规则、未批准或缺少证据的条款不得提升为技术标正文目录。仅生成评分项一一对应的第一版叶子目录，最终目录层级仍需专业审查。
