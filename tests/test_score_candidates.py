@@ -106,6 +106,24 @@ class ScoreCandidatesTests(unittest.TestCase):
         self.assertEqual([x["status"] for x in result["ambiguous_candidates"]],
                          ["requires_manual_scoring_review"] * 2)
 
+    def test_docx_row_base_score_and_penalty_is_adjustment_not_tier(self):
+        self.blocks = [{"location": "第1表第3行", "kind": "table_row",
+                        "text": "列1：安全措施 | 列2：满分10分，每缺一项扣2分"}]
+        self.save_index()
+        result = self.parser_only()
+        self.assertEqual(result["candidates"], [])
+        self.assertEqual(len(result["ambiguous_candidates"]), 1)
+        self.assertEqual(result["ambiguous_candidates"][0]["reason"], "adjustment_rule")
+        self.assertEqual(result["ambiguous_candidates"][0]["score_options"], [10.0, 2.0])
+
+    def test_above_100_scoring_tier_is_preserved_for_review(self):
+        self.blocks = [{"location": "第1行", "kind": "line",
+                        "text": "质量保障措施：合格90分，优秀105分"}]
+        self.save_index()
+        result = self.parser_only()
+        self.assertFalse(result["candidates"])
+        self.assertEqual(result["ambiguous_candidates"][0]["score_options"], [90.0, 105.0])
+
     def test_normal_single_criterion_remains_direct_suggestion(self):
         self.assertEqual([x["score"] for x in self.run_discovery()["candidates"]],
                          [10.0, 15.0])
