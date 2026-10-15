@@ -39,7 +39,7 @@ class ExtractionTests(unittest.TestCase):
                 source = self.root / ("missing" + suffix)
                 source.write_bytes(b"not a real source because dependency is mocked")
                 with patch.dict(sys.modules, {module: None}):
-                    with self.assertRaisesRegex(RuntimeError, r'pip install -e "\\.\\[docs\\]"'):
+                    with self.assertRaisesRegex(RuntimeError, r'pip install -e "\.\[docs\]"'):
                         extract_document(source)
 
     def test_docx_keeps_paragraph_table_paragraph_order(self):
