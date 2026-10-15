@@ -33,3 +33,20 @@ requirements.json：
 ```
 
 注意：以上是结构示意，不是实际招标内容，不得复制示例标题、分值或引文到真实项目。若原文页码不可靠，保留可复查章节/表格位置并注明不足。需求条目不可只存模型总结而缺少原文证据。
+
+## 证据索引（v0.2）
+
+`biaoshu extract <源文件> --output <提取文本.md>` 同时生成 `<提取文本.index.json>`。
+索引含 `source_file`、`sha256`、`blocks`（`location`、`kind`、`text`）和 `warnings`。位置格式：TXT/MD 为 `第N行`，PDF 为 `第N页`，DOCX 为 `第N段` 或 `第N表第M行`。在 `requirements.json` 的 `evidence` 中使用与原始文件对应的位置，逐项核对引用是否与原文一致；不要把索引视作已验证的证据。原始文件内容与索引均不得上传公共仓库。
+
+PDF 扫描页无法直接提取；DOCX 的段落位置不是排版页码，页眉、页脚、文本框和批注未包含；PDF 表格、双栏顺序及 OCR 校正尚不可靠。对所有此类内容以原文件人工复核为准。
+
+
+## 技术评分候选清单
+
+使用 `score-candidates --index <路径> --source-dir <目录> --output <路径>` 生成 `suggestions_only` 候选 JSON。此命令只识别部分明显的技术评分分值行，验证原件 SHA-256 并保留文件、页/段/表格行位置及逐字引文；不直接更新正式 requirements.json。审稿 Agent 必须通读评分原文，对未命中项、多档评分、通用扣分标准和商务评分分类复核，并确保每条正式技术响应需求都附有可核验证据。
+
+
+## Agent 语义分析的输入/输出边界
+
+`analyze-ai` 只将选中的证据索引文本块发送给明确指定的模型，模型负责将片段分类为 `technical_score`、`mandatory_technical_requirement` 或 `scoring_rule`，按原始文件、位置、准确引文返回建议。程序校验引文必须包含在发给模型的原文块内，结果统一标注 `pending_review`，即使全部引用通过文本匹配，仍不代表评分项齐全或响应可中标。尤其应复核分档评分、表格合并单元格、未选入上下文的证据块及强制技术条款。只有用户/审稿 Agent 对原文语义独立复核后才能更新正式 `requirements.json`。

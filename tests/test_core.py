@@ -17,7 +17,7 @@ def populate(root):
          "response_sections": ["S2"]},
     ]})
     write_json(root / "facts.json", {"facts": [
-        {"key": "duration", "value": "30日", "status": "verified",
+        {"key": "duration", "category": "service_duration", "value": "30日", "status": "verified",
          "evidence": {"file": "tender.pdf", "location": "第3页", "quote": "服务期限：30日"}},
     ]})
     write_json(root / "outline.json", {"sections": [

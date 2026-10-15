@@ -1,6 +1,7 @@
 """项目数据模型、结构校验、篇幅分配和机械审计。不调用模型，不编造业务事实。"""
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import re
@@ -26,6 +27,18 @@ def write_json(path: Path, value):
     temp = path.with_name(path.name + ".tmp")
     temp.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     temp.replace(path)
+
+
+def review_context_sha256(state: dict) -> str:
+    """Bind AI chapter approval to all currently registered tender rules and facts.
+
+    Deliberately omits transient reports and rendered sections, but includes
+    requirements/facts/outline, including the section-to-requirement mapping.
+    """
+    payload = {name: state[name] for name in ("requirements.json", "facts.json", "outline.json")}
+    raw = json.dumps(payload, sort_keys=True, ensure_ascii=False,
+                     separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
 
 
 def initialize(root: Path):
@@ -57,6 +70,14 @@ def words(text: str) -> int:
 
 def inspect(root: Path, strict: bool = False) -> dict:
     errors, warnings, observations = [], [], []
+    # An interrupted AI chapter update can leave Markdown and review metadata
+    # in different states. Fail closed until explicit operator recovery.
+    pending = sorted((root / "reports" / "section-writing").glob("*.transaction.json"))
+    if pending:
+        errors.append("存在未恢复的 AI 章节写入事务，禁止审核或正式导出；请执行 section-recover --confirm")
+    from .review_transaction import journal_path
+    if journal_path(root).exists():
+        errors.append("检测到审核导入未完成的事务，禁止审核或导出；请执行 review-recover --confirm")
     try:
         data = load_project(root)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
@@ -65,6 +86,8 @@ def inspect(root: Path, strict: bool = False) -> dict:
     facts = data["facts.json"].get("facts")
     sections = data["outline.json"].get("sections")
     project = data["project.json"]
+    from .outline_tree import validate_outline_state
+    errors.extend(validate_outline_state(root, data["outline.json"]))
     if not all(isinstance(x, list) for x in (requirements, facts, sections)):
         return {"ok": False, "errors": ["requirements、facts、sections 必须为数组"], "warnings": [], "statistics": {}}
     if strict and (not requirements or not sections):
@@ -106,6 +129,41 @@ def inspect(root: Path, strict: bool = False) -> dict:
                 errors.append(f"{sid} 正文文件不存在：sections/{sid}.md")
             else:
                 body = p.read_text(encoding="utf-8")
+                # The pending banner is part of the draft itself. A missing/deleted
+                # sidecar checkpoint must never silently promote a draft.
+                if "> AI生成草稿（待人工审查）" in body:
+                    errors.append(f"{sid} AI 草稿含待审核标记，不能正式审核或导出")
+                # A model-written draft cannot silently pass strict audit or official export.
+                checkpoint = root / "reports" / "section-writing" / (sid + ".json")
+                if checkpoint.exists():
+                    try:
+                        meta = read_json(checkpoint)
+                        if (not isinstance(meta, dict) or meta.get("section_id") != sid
+                                or meta.get("status") != "approved"):
+                            errors.append(f"{sid} AI 章节尚未经人工确认")
+                        elif meta.get("body_sha256") != hashlib.sha256(p.read_bytes()).hexdigest():
+                            errors.append(f"{sid} 审核后正文已更改，需要重新人工确认")
+                        elif meta.get("context_sha256") != review_context_sha256(data):
+                            errors.append(f"{sid} 审核后需求、事实或目录发生变化，需要重新审核")
+                        elif not isinstance(meta.get("source_manifest"), list) or not meta["source_manifest"]:
+                            errors.append(f"{sid} 缺少可核验的原招标来源快照，需要重新审核")
+                        else:
+                            for source in meta["source_manifest"]:
+                                if not isinstance(source, dict) or not all(
+                                        isinstance(source.get(k), str) and source[k]
+                                        for k in ("path", "sha256")):
+                                    errors.append(f"{sid} 原文件快照信息不完整")
+                                    break
+                                try:
+                                    actual = hashlib.sha256(Path(source["path"]).read_bytes()).hexdigest()
+                                except OSError:
+                                    errors.append(f"{sid} 审核时使用的招标原件不可读取")
+                                    break
+                                if actual != source["sha256"]:
+                                    errors.append(f"{sid} 审核后招标原件发生变化，需要重新审核")
+                                    break
+                    except (OSError, ValueError, TypeError):
+                        errors.append(f"{sid} 写作检查点无法读取")
                 actual = words(body)
                 if not body.strip() or "TODO" in body.upper() or "待撰写" in body:
                     errors.append(f"{sid} 正文未完成或包含占位符")
@@ -176,10 +234,29 @@ def inspect(root: Path, strict: bool = False) -> dict:
             warnings.append(f"事实 {key} 待确认，生成正文不得填造具体值")
         elif status == "not_specified" and str(fact.get("value", "")).strip():
             errors.append(f"{key} 未提及事项不得填写推测值")
+    from .consistency import analyze_consistency
+    consistency = analyze_consistency(root, data)
+    for finding in consistency["findings"]:
+        detail = f"跨章节承诺[{finding['code']}]：{finding['message']}"
+        if finding["severity"] == "error" and strict:
+            errors.append(detail)
+        else:
+            warnings.append(detail)
+    from .response_trace import audit_trace, trace_path
+    trace = audit_trace(root)
+    if trace_path(root).exists():
+        for finding in trace["findings"]:
+            message = f"正文响应追溯[{finding['code']}]：{finding['message']}"
+            if strict:
+                errors.append(message)
+            else:
+                warnings.append(message)
+    else:
+        warnings.append("尚未建立评分项→正文段落追溯台账；结构通过不代表评分条款已回应")
     observations.append("仅机械校验，无法替代 AI 语义评分覆盖、矛盾识别及人工终审")
     return {"ok": not errors, "errors": errors, "warnings": warnings,
             "statistics": {"requirements": len(requirements), "sections": len(sections), "facts": len(facts)},
-            "notes": observations}
+            "consistency": consistency, "response_trace": trace, "notes": observations}
 
 
 def allocate(root: Path, total: int):

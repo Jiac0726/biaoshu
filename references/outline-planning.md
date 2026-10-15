@@ -28,3 +28,21 @@ outline.json 用扁平叶子模型管理可独立撰写章节，目录显示层�
 ```
 
 requirements.json 的相应项必须设置 response_sections=["S1"]。对应关系是双向一致性规则。当前 Python 工具只判断映射完整和 ID 合法，不会判断 R1 与 S1 的专业含义是否真的一致；Agent 需逐项对照原文复核。
+
+
+## 经过审查的需求一一映射目录
+
+review-init / review-import 提供第一版确定性叶子目录：每条已审查的技术评分大项或强制技术要求映射一个稳定 S# 章节，并同步登记 R# 的 response_sections；不提升评分细则为章节，不修改用户既有正文。此功能不是多级 AI 目录规划。审核完成后仍须调整章节逻辑层级、检查漏项，并遵守用户已确认的根目录锁定要求。
+
+
+## 层级树模型与已确认一级目录锁（v0.5）
+
+outline.json 保留原 sections 数组和稳定 S# ID；可选 roots 用于 Word 层级和章节顺序，例如：
+
+```json
+{"roots":[{"id":"G1","title":"项目实施与进度","children":[{"section_id":"S1"},{"section_id":"S2"}]},{"section_id":"S3"}]}
+```
+
+一级节点可以是直接章节叶子，也可以是至少包含两个孩子的分组；递归分组支持最多4级深度。每一个 S# 必须恰好引用一次，不得遗漏、重复或引用不存在的章节。outline-init 产生默认保序平面候选，不虚构专业分组；由人工/Agent 根据真实评分逻辑进一步编辑审核。outline-plan 默认只预览，--apply 保留原 sections、改写 roots 并保存原始备份。outline-lock --confirm 将已确认的一级节点标题、顺序及所属所有叶子章节集合保存到 outline-lock.json，允许一级组内部细化和重新排序，但不能偷偷移动评分响应到其他根组。check/audit/Word export 共享这项校验。
+
+**边界**：这一版本的锁是防止自动流程误改而非签名认证。新增招标评分项目时需要重新审查目录归属；当前 review-import 对已经存在 roots 的项目采取拒绝自动新增的保守策略。
