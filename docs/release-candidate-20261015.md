@@ -44,3 +44,10 @@ python scripts/validate_release_candidate.py --report reports/rc-acceptance-loca
 - 复杂评分、多文件断电持久化、真实 Windows 恢复流程需单独验证。
 
 建议先审查 PR #12 与本分支 PR 的 CI，再进行独立 code review，之后由仓库所有者决定是否按顺序合并到受保护 main。
+
+
+## 本轮集成复核新增结果
+
+- PR #12 已修复多档评分未进入人工审核清单的高优先级遗漏、一级叶节点标题损坏的非结构化异常、AI 新建章节部分写入以及已批准内容被二次签署的问题。此类审核不能被单元测试通过所替代。
+- PR #13 的离线验收报告现在使用 `open('x')` 独占创建，避免并发执行覆盖历史结果；同时记录**实际 checkout Git SHA**与已跟踪工作树是否干净，不能把文档中以前的基线提交误当作当前测试版本。若本地没有 Git，版本状态将明确标为 unverified。
+- 最新 PR 验收仍须以 GitHub Actions 实际 checkout/最新 head SHA 为准。没有独立 Approved review、分支保护和真实授权脱敏案例验收前，不得称为正式发布。
