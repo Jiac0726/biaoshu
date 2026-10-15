@@ -50,7 +50,7 @@ def extract_document(source: Path) -> ExtractionResult:
         try:
             from pypdf import PdfReader
         except ImportError as exc:
-            raise RuntimeError('PDF 读取需要 pip install -e "[docs]"') from exc
+            raise RuntimeError('PDF 读取需要 pip install -e ".[docs]"') from exc
         reader = PdfReader(str(source))
         for page_number, page in enumerate(reader.pages, 1):
             content = (page.extract_text() or "").strip()
@@ -66,7 +66,7 @@ def extract_document(source: Path) -> ExtractionResult:
             from docx import Document
             from docx.table import Table
         except ImportError as exc:
-            raise RuntimeError('DOCX 读取需要 pip install -e "[docs]"') from exc
+            raise RuntimeError('DOCX 读取需要 pip install -e ".[docs]"') from exc
         document = Document(str(source))
         paragraph_number = 0
         table_number = 0
