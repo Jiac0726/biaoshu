@@ -66,9 +66,11 @@ def _reference(fact: dict) -> tuple[str, str] | None:
     value = fact.get("value")
     if not isinstance(value, str):
         value = str(value) if isinstance(value, (int, float)) else ""
-    matches = [_quantity(m.group("value"), m.group("unit"))
-               for m in _FACT_VALUE.finditer(value)]
-    return matches[0] if len(matches) == 1 else None
+    # "不超过2小时", "不少于3年" and dates are not exact facts.
+    match = _FACT_VALUE.fullmatch(value.strip())
+    if not match or (match.group("unit") == "年" and Decimal(match.group("value")) >= 100):
+        return None
+    return _quantity(match.group("value"), match.group("unit"))
 
 
 def analyze_consistency(root: Path, state: dict | None = None) -> dict:
@@ -106,12 +108,22 @@ def analyze_consistency(root: Path, state: dict | None = None) -> dict:
         in_code = False
         for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
             trimmed = line.strip()
-            if trimmed.startswith(chr(96) * 3):
+            if trimmed.startswith((chr(96) * 3, "~" * 3)):
                 in_code = not in_code
                 continue
             if in_code or not trimmed or trimmed.startswith((">", "#", "|")):
                 continue
             for match in _STATEMENT.finditer(line):
+                # "设备供货工期" must not be mistaken for the project duration.
+                if match.start() > 0 and "\u4e00" <= line[match.start() - 1] <= "\u9fff":
+                    continue
+                # Bound values, approximations and calendar dates are not
+                # deterministic equalities, so must not block final export.
+                rest = line[match.end():]
+                if re.match(r"\s*(?:内|以内|以上|以下|左右|起|至|到|前|后|不等|\d)", rest):
+                    continue
+                if match.group("unit") == "年" and Decimal(match.group("value")) >= 100:
+                    continue
                 # Look only within the clause containing this statement.
                 # Conditional examples must not become hard export blockers.
                 prefix = re.split(r"[。；;！!？?]", line[:match.start()])[-1]
