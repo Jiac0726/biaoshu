@@ -414,6 +414,37 @@ class SectionWriterTests(unittest.TestCase):
             recover(self.project, "S1", confirm=True, unlock_stale=True)
         self.assertTrue(lock.exists())
 
+    def test_journal_recovery_refuses_live_owner_even_with_unlock_stale(self):
+        import os
+        from biaoshu.section_transaction import stage, stage_path, recover
+        self.one()
+        destination = self.project / "sections" / "S1.md"
+        sidecar = checkpoint_path(self.project, "S1")
+        before_doc, before_ckpt = destination.read_bytes(), sidecar.read_bytes()
+        lock = sidecar.with_name("S1.write.lock")
+        for phase in ("writing", "approving"):
+            with self.subTest(phase=phase):
+                stage(self.project, "S1", b"hypothetical new draft",
+                      b'{"status":"approved"}', status=phase)
+                lock.write_text(json.dumps({"pid": os.getpid(), "status": phase}),
+                                encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, "仍然存活"):
+                    recover(self.project, "S1", confirm=True, unlock_stale=True)
+                self.assertTrue(stage_path(self.project, "S1").exists())
+                self.assertTrue(lock.exists())
+                self.assertEqual(destination.read_bytes(), before_doc)
+                self.assertEqual(sidecar.read_bytes(), before_ckpt)
+                # Explicit operator recovery succeeds only once the owner
+                # is demonstrably gone and the existing contents are known.
+                lock.write_text(json.dumps({"pid": 987654321, "status": phase}),
+                                encoding="utf-8")
+                self.assertEqual(recover(self.project, "S1",
+                                         confirm=True, unlock_stale=True)["status"], "restored")
+                self.assertFalse(stage_path(self.project, "S1").exists())
+                self.assertFalse(lock.exists())
+                self.assertEqual(destination.read_bytes(), before_doc)
+                self.assertEqual(sidecar.read_bytes(), before_ckpt)
+
     def test_recovery_rejects_malformed_section_identity(self):
         from biaoshu.section_transaction import recover
         with self.assertRaisesRegex(ValueError, "不合法的小节 ID"):
