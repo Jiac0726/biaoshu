@@ -111,6 +111,18 @@ class ResponseTraceTests(unittest.TestCase):
         write_json(trace_path(self.root), obj)
         self.assertIn("non_prose_evidence", [x["code"] for x in audit_trace(self.root)["findings"]])
 
+    def test_fenced_code_content_cannot_count_as_response_prose(self):
+        self.setup_review()
+        text = "# 项目实施管理\\n\\n" + chr(96) * 3 + "text\\n" + self.a + "\\n" + chr(96) * 3 + "\\n"
+        self.a_path.write_text(text, encoding="utf-8")
+        obj = read_json(trace_path(self.root))
+        obj["items"][0]["section_sha256"] = __import__("hashlib").sha256(
+            self.a_path.read_bytes()).hexdigest()
+        obj["items"][0].update(line=4, quote=self.a)
+        write_json(trace_path(self.root), obj)
+        self.assertIn("non_prose_evidence",
+                      [finding["code"] for finding in audit_trace(self.root)["findings"]])
+
     def test_section_edit_after_review_blocks_strict_audit(self):
         self.setup_review()
         self.a_path.write_text(self.a_path.read_text(encoding="utf-8") + "\n新的工艺承诺\n", encoding="utf-8")
