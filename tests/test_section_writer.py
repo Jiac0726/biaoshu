@@ -445,6 +445,58 @@ class SectionWriterTests(unittest.TestCase):
                 self.assertEqual(destination.read_bytes(), before_doc)
                 self.assertEqual(sidecar.read_bytes(), before_ckpt)
 
+    def test_windows_recovery_never_signals_a_live_approval_owner(self):
+        import os
+        from biaoshu.section_transaction import stage, stage_path, recover
+        self.one()
+        sidecar = checkpoint_path(self.project, "S1")
+        section = self.project / "sections" / "S1.md"
+        original_section, original_sidecar = section.read_bytes(), sidecar.read_bytes()
+        stage(self.project, "S1", b"hypothetical approved body",
+              b'{"status":"approved"}', status="approving")
+        lock = sidecar.with_name("S1.write.lock")
+        lock.write_text(json.dumps({"pid": os.getpid(), "status": "approving"}),
+                        encoding="utf-8")
+        with patch("biaoshu.section_transaction.sys.platform", "win32"), \
+                patch("biaoshu.section_transaction._windows_pid_running",
+                      return_value=True) as probe, \
+                patch("biaoshu.section_transaction.os.kill",
+                      side_effect=AssertionError("Never call os.kill on Windows")):
+            with self.assertRaisesRegex(ValueError, "仍然存活"):
+                recover(self.project, "S1", confirm=True, unlock_stale=True)
+            probe.assert_called_once_with(os.getpid())
+        self.assertTrue(stage_path(self.project, "S1").exists())
+        self.assertEqual(section.read_bytes(), original_section)
+        self.assertEqual(sidecar.read_bytes(), original_sidecar)
+        lock.unlink()
+        self.assertEqual(recover(self.project, "S1", confirm=True)["status"], "restored")
+
+    def test_windows_pid_query_is_read_only_and_fail_closed(self):
+        import ctypes
+        from ctypes import wintypes
+        from unittest.mock import Mock
+        from biaoshu.section_transaction import _windows_pid_running
+        kernel = Mock()
+        kernel.OpenProcess.return_value = 1234
+        def return_active(handle, pointer):
+            self.assertEqual(handle, 1234)
+            ctypes.cast(pointer, ctypes.POINTER(wintypes.DWORD)).contents.value = 259
+            return True
+        kernel.GetExitCodeProcess.side_effect = return_active
+        with patch("ctypes.WinDLL", return_value=kernel, create=True):
+            self.assertTrue(_windows_pid_running(4321))
+        kernel.OpenProcess.assert_called_once_with(0x1000, False, 4321)
+        kernel.GetExitCodeProcess.assert_called_once()
+        kernel.CloseHandle.assert_called_once_with(1234)
+        kernel.OpenProcess.return_value = None
+        with patch("ctypes.WinDLL", return_value=kernel, create=True), \
+                patch("ctypes.get_last_error", return_value=87, create=True):
+            self.assertFalse(_windows_pid_running(987654321))
+        with patch("ctypes.WinDLL", return_value=kernel, create=True), \
+                patch("ctypes.get_last_error", return_value=5, create=True):
+            with self.assertRaises(OSError):
+                _windows_pid_running(777)
+
     def test_recovery_rejects_malformed_section_identity(self):
         from biaoshu.section_transaction import recover
         with self.assertRaisesRegex(ValueError, "不合法的小节 ID"):
