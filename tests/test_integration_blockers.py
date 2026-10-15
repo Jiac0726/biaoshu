@@ -25,11 +25,8 @@ class HardeningRegressionTests(unittest.TestCase):
         self.source = self.source_dir / "tender.txt"
         self.source.write_text("技术评分要求写出实施方案\n", encoding="utf-8")
         self.index = self.root / "tender.index.json"
-        self.index_obj = {
-            "schema_version": 1, "source_file": "tender.txt",
-            "sha256": hashlib.sha256(self.source.read_bytes()).hexdigest(),
-            "blocks": [{"location": "第1行", "text": "技术评分要求写出实施方案"}],
-        }
+        from biaoshu.extraction import extract_document
+        self.index_obj = extract_document(self.source).index
         write_json(self.index, self.index_obj)
         write_json(self.project / "requirements.json", {"requirements": [
             {"id": "R1", "title": "实施方案", "score": 10,
