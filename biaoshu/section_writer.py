@@ -258,7 +258,7 @@ def approve_section(root: Path, section_id: str, *, acknowledgement: str) -> dic
         raise ValueError("生成后章节关联需求已变更，必须重新核对并生成正文")
     context_sha = review_context_sha256(state)
     if meta.get("context_sha256") != context_sha:
-        raise ValueError("章节生成或批准后需求、事实或目录已经变动，不能重新签署旧内容")
+        raise ValueError("生成后正式需求、事实或目录已经变动，禁止审批或重新签署旧内容")
     manifest = meta.get("source_manifest")
     if not isinstance(manifest, list) or not manifest:
         raise ValueError("检查点缺少原文来源指纹，禁止批准未经来源绑定的草稿")
