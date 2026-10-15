@@ -109,3 +109,8 @@ Python 3.10+。在本仓库目录运行：
 ### 技术评分候选初筛
 
 可以运行 `python -m biaoshu score-candidates --index <索引> --source-dir <原文件目录> --output <候选JSON>` 辅助定位技术评分项目。候选 `pending_review` 不得自动升级为真实 requirements；须从招标原件和完整评审表中进行语义核对，补齐分档评分与未明示分数的实质要求。
+
+
+### 可选本地 AI 招标分析
+
+如用户明确授权使用某个已启动的本地模型，可运行 `python -m biaoshu analyze-ai --index ... --source-dir ... --model ... --output ...`（默认只允许 loopback 地址）。远程模型默认禁止；只有在用户明确授权真实招标资料外发且理解数据处理政策后，才可使用 `--allow-remote`。所有 AI 候选均为 `pending_review`，必须逐项核对原文、纠正分类及补全遗漏；未经核准不能自动写入 requirements.json。见 README。
