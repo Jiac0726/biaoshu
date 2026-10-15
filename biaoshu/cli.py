@@ -14,6 +14,7 @@ from .ai_tender_analysis import analyze_tender
 from .review_import import review_template, reviewed_import
 from .outline_tree import (outline_template, outline_plan, lock_outline,
                            walk_outline, validate_outline_state)
+from .section_writer import write_sections, approve_section
 
 
 def extract_source(source: Path) -> str:
@@ -145,6 +146,21 @@ def main(argv=None):
     outline_lock = sub.add_parser("outline-lock", help="显式锁定一级目录名称、顺序和章节归属")
     outline_lock.add_argument("project_dir", type=Path)
     outline_lock.add_argument("--confirm", action="store_true")
+    writing = sub.add_parser("write-sections", help="按评分项逐章节 AI 生成未批准草稿；已有正文不覆盖")
+    writing.add_argument("project_dir", type=Path)
+    writing.add_argument("--section", action="append", help="指定 S# 章节；不指定时按目录顺序处理全部")
+    writing.add_argument("--index", action="append", type=Path, required=True)
+    writing.add_argument("--source-dir", type=Path, required=True)
+    writing.add_argument("--model", required=True)
+    writing.add_argument("--endpoint", default="http://127.0.0.1:11434/v1")
+    writing.add_argument("--allow-remote", action="store_true")
+    writing.add_argument("--api-key-env")
+    writing.add_argument("--timeout", type=float, default=90)
+    approving = sub.add_parser("approve-section", help="人工逐项审查后批准一个指定章节")
+    approving.add_argument("project_dir", type=Path)
+    approving.add_argument("--section", required=True)
+    approving.add_argument("--acknowledgement", required=True,
+                           help="必须填写真实人工复核确认句，不得由模型代替")
     args = parser.parse_args(argv)
     try:
         if args.command == "init":
@@ -157,6 +173,18 @@ def main(argv=None):
             index_path = args.output.with_suffix(".index.json")
             write_json(index_path, extracted.index)
             print(f"已提取：{args.output}；证据索引：{index_path}。请人工核对缺失文本和提取警告。")
+        elif args.command == "write-sections":
+            report = write_sections(args.project_dir, args.section, args.index,
+                                    args.source_dir, model=args.model,
+                                    endpoint=args.endpoint, allow_remote=args.allow_remote,
+                                    api_key_env=args.api_key_env, timeout=args.timeout)
+            for item in report["outcomes"]:
+                print(f"章节 {item['section_id']}：{item['status']}")
+            print(f"本轮处理 {report['completed']} 节。AI 新内容待人工审查；保留既有章节。")
+        elif args.command == "approve-section":
+            result = approve_section(args.project_dir, args.section,
+                                     acknowledgement=args.acknowledgement)
+            print(f"章节 {result['section_id']}：已由操作者声明审核通过；仍需全篇终审。")
         elif args.command == "outline-init":
             if args.output.exists():
                 raise ValueError("目录候选文件已存在，禁止覆盖，请指定新路径")
