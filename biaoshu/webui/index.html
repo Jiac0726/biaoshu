@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Biaoshu · 标书工作台</title>
+  <link rel="stylesheet" href="/style.css">
+  <script defer src="/app.js"></script>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">B</div>
+        <div><strong>BIAOSHU</strong><span>标书智能工作台</span></div>
+      </div>
+      <div class="nav-label">我的项目 <button class="icon-btn" id="newProject" title="创建项目" aria-label="创建项目">＋</button></div>
+      <div id="projectList" class="project-list"><p class="hint">加载项目中…</p></div>
+      <div class="sidebar-bottom">
+        <div class="side-indicator"><span class="live-dot"></span> 本地私有工作区</div>
+        <p>本机运行 · 无云端自动上传</p>
+        <a href="https://github.com/Jiac0726/biaoshu" target="_blank" rel="noopener noreferrer">GitHub 代码仓库 ↗</a>
+      </div>
+    </aside>
+    <main class="main">
+      <header class="topbar">
+        <div class="breadcrumbs">工作空间 <span>/</span> <strong id="breadcrumb">项目概览</strong></div>
+        <div class="top-privacy">● LOCAL MODE <span>127.0.0.1</span></div>
+      </header>
+      <div class="content">
+        <section class="hero">
+          <div class="eyebrow">TENDER WRITING SYSTEM / V1 LOCAL MVP</div>
+          <h1 id="projectTitle">从招标文件到专业技术标</h1>
+          <p id="projectSubtitle">以原始条款为依据，让每一条评分要求都有对应的技术响应。AI 负责辅助写作，关键决定由你确认。</p>
+          <div class="hero-chips"><span>原文证据可追溯</span><span>本地大模型</span><span>逐节人工审核</span><span>Word 导出</span></div>
+        </section>
+        <div id="emptyState" class="empty-state">
+          <div class="empty-illustration">▤</div>
+          <h2>创建你的第一个标书项目</h2>
+          <p>上传 PDF / DOCX 招标资料，然后按流程生成可审查的技术标草稿。</p>
+          <button class="primary" id="emptyCreate">＋ 新建标书项目</button>
+        </div>
+        <div id="workspace" class="hidden">
+          <section class="steps" aria-label="工作流程">
+            <div class="step"><small>01</small><strong>招标资料</strong></div>
+            <div class="step"><small>02</small><strong>评分分析</strong></div>
+            <div class="step"><small>03</small><strong>人工审核</strong></div>
+            <div class="step"><small>04</small><strong>章节撰写</strong></div>
+            <div class="step"><small>05</small><strong>审查与导出</strong></div>
+          </section>
+
+          <section class="section-card" id="sourceCard">
+            <div class="section-head"><div><span class="section-num">01 / DOCUMENTS</span><h2>导入招标资料</h2><p>保留原始文件和 SHA-256 证据索引，支持多份材料。</p></div><span class="small-tag" id="sourceCount">0 文件</span></div>
+            <div class="upload-zone">
+              <div class="upload-icon">⇧</div><div><strong>将招标文件放入项目</strong><p>PDF、DOCX、TXT、MD · 单文件不超过 40 MB</p></div>
+              <input id="fileUpload" type="file" multiple accept=".pdf,.docx,.txt,.md" aria-label="选择招标文件">
+              <button id="uploadBtn" class="primary">上传文件</button>
+            </div>
+            <div id="sourceList" class="source-list"><p class="hint">暂无文件</p></div>
+          </section>
+
+          <section class="section-card">
+            <div class="section-head"><div><span class="section-num">02 / ANALYSIS</span><h2>评分项智能解析</h2><p>先使用确定性规则筛查，再选择是否使用本机 AI 补充建议。</p></div><span class="small-tag">仅生成建议</span></div>
+            <div class="model-config">
+              <label>本地模型名称<input id="modelName" placeholder="填写 ollama list 中的名称，例如 qwen3:8b" autocomplete="off"></label>
+              <label>模型服务地址<input id="modelEndpoint" value="http://127.0.0.1:11434/v1" autocomplete="off"></label>
+            </div>
+            <div class="actions">
+              <button class="secondary" data-action="score">提取评分候选</button>
+              <button class="primary" data-action="analyze">✦ 本地 AI 分析</button>
+            </div>
+            <div id="suggestionList" class="suggestion-list"><p class="hint">上传并解析资料后，点击评分候选分析。</p></div>
+          </section>
+
+          <section class="section-card">
+            <div class="section-head"><div><span class="section-num">03 / HUMAN REVIEW</span><h2>逐项审核与正式登记</h2><p>AI 不会自行决定哪些评分项纳入投标需求。请亲自核对招标原文。</p></div><span class="warning-label">人工确认必需</span></div>
+            <div class="actions"><button class="secondary" data-action="review-init">创建审核清单</button></div>
+            <div id="reviewArea"><p class="hint">生成评分建议后创建审核清单。</p></div>
+            <div class="actions review-tools">
+              <button class="secondary" id="reviewSave">保存审核决定</button>
+              <button class="secondary" data-action="review-preview">预览登记结果</button>
+              <button class="primary" data-action="review-apply">确认并登记需求</button>
+            </div>
+          </section>
+
+          <section class="section-card">
+            <div class="section-head"><div><span class="section-num">04 / OUTLINE & WRITING</span><h2>目录结构与 AI 分章节撰写</h2><p>稳定章节编号、不覆盖已有正文，生成后需要人工检查和批准。</p></div><span class="small-tag" id="sectionCount">0 章节</span></div>
+            <div class="subheading">目录管理</div>
+            <div class="actions">
+              <button class="secondary" data-action="outline-init">生成目录候选</button>
+              <button class="secondary" id="outlineSave">保存目录 JSON</button>
+              <button class="secondary" data-action="outline-preview">检查目录</button>
+              <button class="secondary" data-action="outline-apply">应用目录</button>
+              <button class="secondary" data-action="outline-lock">锁定一级目录</button>
+            </div>
+            <div id="outlineEditor" class="hidden"><label class="form-label" for="outlineRoots">目录 roots（JSON 数组，可以调整分组，不要改章节 ID）</label><textarea id="outlineRoots" rows="8" spellcheck="false"></textarea></div>
+            <div class="subheading">正文计划</div>
+            <div class="actions">
+              <label class="inline-number">目标总字数 <input id="targetWords" type="number" value="12000" min="100" max="200000"></label>
+              <button class="secondary" data-action="allocate">分配字数</button>
+              <button class="secondary" data-action="scaffold">初始化章节文件</button>
+              <button class="primary" data-action="write">✦ 生成未完成章节</button>
+            </div>
+            <div id="sectionsList" class="chapters"><p class="hint">审核登记评分需求后出现章节。</p></div>
+          </section>
+
+          <section class="section-card">
+            <div class="section-head"><div><span class="section-num">05 / DELIVERY</span><h2>质量检查与 Word 交付</h2><p>对已核实的要求、跨章节期限和审查状态进行一致性检查。</p></div><span class="small-tag">需专业终审</span></div>
+            <div class="actions">
+              <button class="secondary" data-action="check">结构与证据检查</button>
+              <button class="secondary" data-action="consistency">跨章节一致性</button>
+              <button class="secondary" data-action="audit">严格审计</button>
+              <button class="secondary" data-action="trace-init">创建响应追溯台账</button>
+              <button class="secondary" data-action="trace-audit">核查响应追溯</button>
+              <button class="secondary" data-action="semantic-review">✦ AI 语义审稿</button>
+            </div>
+            <div id="auditArea" class="audit-area"><p class="hint">尚无审计结果。</p></div>
+            <div class="delivery-box">
+              <div><strong>导出技术标 Word</strong><p>草稿会明确标注未完成校验；正式导出必须通过现有审核门禁。</p></div>
+              <div class="actions"><button class="secondary" data-action="draft-export">导出草稿 DOCX</button><button class="primary" data-action="final-export">导出正式 DOCX</button></div>
+            </div>
+            <div id="exportList" class="download-list"></div>
+          </section>
+          <div class="footer-note">注意：自动测试、AI 评分建议、来源字符串一致性检查均不等于招标合规。扫描件 OCR、复杂跨页表格、暗标和正式样式需要额外人工审核。</div>
+        </div>
+      </div>
+    </main>
+  </div>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <div id="working" class="working hidden"><div class="working-card"><span class="spinner"></span><strong>正在处理任务</strong><p>本地模型生成较长章节时需要一些时间。请保持当前页面打开。</p></div></div>
+</body>
+</html>
