@@ -282,3 +282,7 @@ python -m biaoshu section-recover ./workspaces/my-bid --section S1 --confirm --u
 
 `analyze-ai`、`semantic-review`、`score-candidates`、`review-init`、`outline-init` 的输出现在采取双重保护：在执行模型或分析前拒绝正式项目/审核文件名及已有路径，完成后以同目录临时文件、原子独占创建，不能覆盖旧报告、招标原文、证据索引或项目配置。输出目标已有文件时，请明确指定新路径，不要依赖自动覆盖。这个保护不会让审稿建议自动提升为人工批准。
 
+
+### 期限类别在 AI 写作提示中的保真
+
+人工核实的通用期限事实（如 `{"key":"duration","category":"service_duration","status":"verified","value":"30日"}`）在进入章节写作提示时保留 `category`，并明确告知模型不能将服务期限当作项目工期或质保期。对泛化期限事实缺失类别、类别无效的情况会在模型调用前拒绝生成。此项为来源约束检查，不保证模型一定能正确理解所有专业条款，仍需人工确认。
