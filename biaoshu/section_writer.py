@@ -261,6 +261,7 @@ def _approve_section_locked(root: Path, section_id: str, *, acknowledgement: str
         raise ValueError("没有可审批的 AI 章节或检查点")
     meta = json.loads(checkpoint.read_text(encoding="utf-8"))
     current = dest.read_text(encoding="utf-8")
+    initial_content = current
     if meta.get("section_id") != section_id or meta.get("status") not in {"pending_review", "approved"}:
         raise ValueError("当前检查点不能审批")
     if meta["status"] == "pending_review" and _digest(current.encode("utf-8")) != meta.get("body_sha256"):
@@ -301,7 +302,7 @@ def _approve_section_locked(root: Path, section_id: str, *, acknowledgement: str
     # reviewed draft; never silently approve a bannerless partial write.
     if meta["status"] == "approved":
         return {"section_id": section_id, "status": "approved"}
-    if current != dest.read_text(encoding="utf-8"):
+    if initial_content != dest.read_text(encoding="utf-8"):
         raise ValueError("批准前章节被并发修改，拒绝写入")
     approved_bytes = current.encode("utf-8")
     meta["status"] = "approved"
