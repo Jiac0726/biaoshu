@@ -47,7 +47,15 @@ def _signature(roots: list[dict], sections: list[dict]) -> list[dict]:
 
 def validate_roots(roots: object, sections: list[dict]) -> list[str]:
     errors: list[str] = []
-    section_ids = [sec.get("id") for sec in sections if isinstance(sec, dict)]
+    # Invalid IDs may be unhashable (list/dict). Report them as validation
+    # errors instead of raising TypeError while constructing a set.
+    section_ids = []
+    for idx, sec in enumerate(sections):
+        sid = sec.get("id") if isinstance(sec, dict) else None
+        if isinstance(sid, str) and ID_RE.fullmatch(sid):
+            section_ids.append(sid)
+        else:
+            errors.append(f"sections[{idx}] 章节 ID 不合法：{sid!r}")
     if not isinstance(roots, list) or (section_ids and not roots):
         return ["目录树 roots 必须是非空数组（存在正文小节时）"]
     if not isinstance(roots, list):
@@ -189,10 +197,19 @@ def outline_plan(root: Path, proposal_path: Path, *, apply: bool = False) -> dic
     prior = (root / "outline.json").read_bytes()
     fingerprint = hashlib.sha256(prior).hexdigest()
     backup = root / "reports" / "outline-backups" / (fingerprint + ".json")
-    if backup.exists():
-        raise ValueError("目录备份已存在；为避免覆盖，请人工检查历史操作")
     backup.parent.mkdir(parents=True, exist_ok=True)
-    backup.write_bytes(prior)
+    if backup.exists():
+        # A→B→A→C should reuse the existing immutable backup of A. Reject
+        # a different body (e.g. tampered backup), never overwrite history.
+        if backup.read_bytes() != prior:
+            raise ValueError("目录备份指纹路径已有不同内容，拒绝覆盖历史审核证据")
+    else:
+        from .review_transaction import atomic_create
+        try:
+            atomic_create(backup, prior)
+        except FileExistsError:
+            if backup.read_bytes() != prior:
+                raise ValueError("备份创建期间内容已发生冲突，拒绝继续")
     updated = {**outline, "roots": proposed_roots}
     write_json(root / "outline.json", updated)
     plan["status"] = "applied"

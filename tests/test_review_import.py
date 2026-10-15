@@ -628,6 +628,127 @@ class ReviewedImportTests(unittest.TestCase):
             self.run_import(apply=True)
         self.assertEqual((self.project / "outline.json").read_bytes(), snapshot)
 
+    def test_idempotent_apply_is_registered_not_preview(self):
+        from biaoshu.cli import main
+        import contextlib
+        import io
+        self.decide()
+        self.run_import(apply=True)
+        result = self.run_import(apply=True)
+        self.assertEqual(result["status"], "already_registered")
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.assertEqual(main([
+                "review-import", str(self.project), "--apply",
+                "--suggestions", str(self.suggestions),
+                "--review", str(self.review_path),
+                "--index", str(self.index_path),
+                "--source-dir", str(self.sources),
+            ]), 0)
+        self.assertIn("已登记（无新增", output.getvalue())
+        self.assertNotIn("仅预览", output.getvalue())
+        self.assertEqual(len(read_json(self.project / "requirements.json")["requirements"]), 1)
+
+    def test_all_rejected_apply_is_no_changes_not_preview(self):
+        from biaoshu.cli import main
+        import contextlib
+        import io
+        self.decide(("reject", "reject"))
+        self.assertEqual(self.run_import(apply=True)["status"], "no_changes")
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            self.assertEqual(main([
+                "review-import", str(self.project), "--apply",
+                "--suggestions", str(self.suggestions),
+                "--review", str(self.review_path),
+                "--index", str(self.index_path),
+                "--source-dir", str(self.sources),
+            ]), 0)
+        self.assertIn("审核操作完成（无新增）", stdout.getvalue())
+        self.assertEqual(read_json(self.project / "requirements.json")["requirements"], [])
+
+    def test_blocked_hierarchy_visible_on_cli_without_report_path(self):
+        from biaoshu.cli import main
+        from biaoshu.outline_tree import outline_template, outline_plan, lock_outline
+        import contextlib
+        import io
+        self.decide(("accept", "reject"))
+        self.run_import(apply=True)
+        proposal = self.root / "roots-for-cli.json"
+        write_json(proposal, outline_template(self.project))
+        outline_plan(self.project, proposal, apply=True)
+        lock_outline(self.project, confirm=True)
+        self.decide(("accept", "accept"))
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            code = main([
+                "review-import", str(self.project),
+                "--suggestions", str(self.suggestions),
+                "--review", str(self.review_path),
+                "--index", str(self.index_path),
+                "--source-dir", str(self.sources),
+            ])
+        self.assertEqual(code, 1)
+        self.assertIn("预览阻断", stdout.getvalue())
+        self.assertIn("roots", stdout.getvalue())
+        self.assertIn("阻断原因", stdout.getvalue())
+        self.assertEqual(len(read_json(self.project / "requirements.json")["requirements"]), 1)
+
+    def test_null_roots_allows_valid_flat_import(self):
+        data = read_json(self.project / "outline.json")
+        data["roots"] = None
+        write_json(self.project / "outline.json", data)
+        self.decide()
+        preview = self.run_import()
+        self.assertEqual(preview["status"], "ready")
+        applied = self.run_import(apply=True)
+        self.assertEqual(applied["status"], "applied")
+        self.assertEqual(len(read_json(self.project / "requirements.json")["requirements"]), 1)
+        self.assertIsNone(read_json(self.project / "outline.json")["roots"])
+
+    def test_external_json_type_change_1_to_true_is_never_overwritten(self):
+        from unittest.mock import patch
+        import biaoshu.review_import as importer
+        self.decide()
+        req = self.project / "requirements.json"
+        state = read_json(req)
+        state["revision"] = 1
+        write_json(req, state)
+        original = importer._source_blocks
+        def edit_in_middle(index_paths, source_dir):
+            current = read_json(req)
+            current["revision"] = True
+            write_json(req, current)
+            return original(index_paths, source_dir)
+        with patch.object(importer, "_source_blocks", side_effect=edit_in_middle):
+            with self.assertRaisesRegex(ValueError, "过时快照"):
+                self.run_import(apply=True)
+        self.assertIs(read_json(req)["revision"], True)
+        self.assertEqual(read_json(req)["requirements"], [])
+        self.assertEqual(read_json(self.project / "outline.json")["sections"], [])
+        self.assertFalse((self.project / "reports" / "review-import-transaction.json").exists())
+
+    def test_external_json_type_change_true_to_1_is_never_overwritten(self):
+        from unittest.mock import patch
+        import biaoshu.review_import as importer
+        self.decide()
+        path = self.project / "outline.json"
+        payload = read_json(path)
+        payload["reviewed"] = True
+        write_json(path, payload)
+        original = importer._source_blocks
+        def change(index_paths, source_dir):
+            item = read_json(path)
+            item["reviewed"] = 1
+            write_json(path, item)
+            return original(index_paths, source_dir)
+        with patch.object(importer, "_source_blocks", side_effect=change):
+            with self.assertRaisesRegex(ValueError, "过时快照"):
+                self.run_import(apply=True)
+        self.assertEqual(read_json(path)["reviewed"], 1)
+        self.assertIs(type(read_json(path)["reviewed"]), int)
+        self.assertEqual(read_json(self.project / "requirements.json")["requirements"], [])
+
     def test_reviewer_cannot_accept_invalid_score(self):
         data = read_json(self.suggestions)
         data["candidates"][0]["score"] = True

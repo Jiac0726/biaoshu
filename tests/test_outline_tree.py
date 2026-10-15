@@ -86,6 +86,69 @@ class OutlineHierarchyTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "至少有两个子节点"):
             outline_plan(self.root, self.proposal)
 
+    def test_unhashable_section_ids_produce_errors_and_check_report(self):
+        import contextlib
+        import io
+        self.proposed(self.grouped())
+        outline_plan(self.root, self.proposal, apply=True)
+        for invalid in (["S1"], {"key": "S1"}):
+            with self.subTest(bad=invalid):
+                payload = read_json(self.root / "outline.json")
+                payload["sections"][0]["id"] = invalid
+                write_json(self.root / "outline.json", payload)
+                report = inspect(self.root)
+                self.assertFalse(report["ok"])
+                self.assertTrue(any("章节 ID" in e for e in report["errors"]))
+                dest = self.root / "reports" / ("invalid-" + str(len(invalid)) + ".json")
+                with contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(main(["check", str(self.root), "--output",
+                                           str(dest)]), 1)
+                self.assertFalse(read_json(dest)["ok"])
+                dest.unlink()
+
+    def test_identical_outline_backup_reuse_after_revisiting_previous_state(self):
+        a = self.grouped()
+        b = self.grouped()
+        b[0]["children"].reverse()
+        c = [
+            {"id": "G1", "title": "项目实施与进度", "children": [
+                {"section_id": "S1"}, {"section_id": "S3"}]},
+            {"section_id": "S2"},
+        ]
+        self.proposed(a)
+        outline_plan(self.root, self.proposal, apply=True)
+        prior_a = (self.root / "outline.json").read_bytes()
+        self.proposed(b)
+        first = outline_plan(self.root, self.proposal, apply=True)
+        backup = Path(first["backup_path"])
+        self.assertEqual(backup.read_bytes(), prior_a)
+        self.proposed(a)
+        self.assertEqual(outline_plan(self.root, self.proposal, apply=True)["status"], "applied")
+        self.proposed(c)
+        second = outline_plan(self.root, self.proposal, apply=True)
+        self.assertEqual(second["status"], "applied")
+        self.assertEqual(second["backup_path"], str(backup))
+        self.assertEqual(backup.read_bytes(), prior_a)
+        self.assertTrue(inspect(self.root)["ok"])
+
+    def test_outline_backup_mismatch_blocks_without_changes(self):
+        self.proposed(self.grouped())
+        outline_plan(self.root, self.proposal, apply=True)
+        a = read_json(self.root / "outline.json")
+        b = self.grouped()
+        b[0]["children"].reverse()
+        self.proposed(b)
+        prior = (self.root / "outline.json").read_bytes()
+        import hashlib
+        backup = self.root / "reports" / "outline-backups" / (
+            hashlib.sha256(prior).hexdigest() + ".json")
+        backup.parent.mkdir(parents=True, exist_ok=True)
+        backup.write_bytes(b"tampered historical backup")
+        with self.assertRaisesRegex(ValueError, "不同内容"):
+            outline_plan(self.root, self.proposal, apply=True)
+        self.assertEqual((self.root / "outline.json").read_bytes(), prior)
+        self.assertEqual(backup.read_bytes(), b"tampered historical backup")
+
     def test_lock_needs_explicit_confirmation_and_preserves_root_names(self):
         self.proposed(self.grouped())
         outline_plan(self.root, self.proposal, apply=True)
