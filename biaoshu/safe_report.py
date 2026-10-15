@@ -1,0 +1,32 @@
+"""Never overwrite project state or an existing artifact with AI suggestions.
+
+Reports are intentionally published with exclusive creation. The source
+document/indices and formal project files must never be report destinations.
+A same-directory fully-written temporary file makes interrupted writes safe.
+"""
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from .review_transaction import atomic_create
+
+_PROTECTED_NAMES = {
+    "project.json", "requirements.json", "facts.json", "outline.json",
+    "response-trace.json", "outline-lock.json",
+}
+
+
+def write_new_report(path: Path, value: dict) -> None:
+    """Write a new local JSON report, never replacing an existing path."""
+    path = Path(path)
+    if path.name.lower() in _PROTECTED_NAMES:
+        raise ValueError("输出文件名与正式项目或审核数据冲突，不能作为建议报告目标")
+    # Serialize before opening or creating any output so an invalid result
+    # never leaves a partial file.
+    content = (json.dumps(value, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        atomic_create(path, content)
+    except FileExistsError as exc:
+        raise ValueError("报告目标已经存在；禁止覆盖现有报告、原招标文件或项目正式数据") from exc
