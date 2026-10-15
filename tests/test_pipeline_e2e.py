@@ -197,6 +197,28 @@ class SyntheticBidPipelineTests(unittest.TestCase):
         self.assertNotIn(BANNER, full_text)
         self.assertEqual(len([c for c in self.model_calls if c[0] == "write"]), 2)
 
+    def test_e2e_response_trace_review_gate_and_current_paragraph_locations(self):
+        from biaoshu.response_trace import ACKNOWLEDGEMENT as TRACE_ACK, trace_path
+        self.prepare_reviewed_outline()
+        self.assertEqual(self.write_all(), 0)
+        self.approve_all()
+        self.assertEqual(self.cli("trace-init", str(self.project)), 0)
+        self.assertEqual(self.cli("audit", str(self.project), *self.source_args()), 1)
+        trace = read_json(trace_path(self.project))
+        self.assertEqual(len(trace["items"]), 2)
+        for row in trace["items"]:
+            body = (self.project / "sections" / (row["section_id"] + ".md")).read_text(encoding="utf-8")
+            row["line"] = 3
+            row["quote"] = body.splitlines()[2]
+            row["decision"] = "confirmed"
+        trace["acknowledgement"] = TRACE_ACK
+        write_json(trace_path(self.project), trace)
+        self.assertEqual(self.cli("trace-audit", str(self.project)), 0)
+        self.assertEqual(self.cli("audit", str(self.project), *self.source_args()), 0)
+        self.assertEqual(self.cli("export", str(self.project), *self.source_args(),
+                                  "--output", str(self.outfile)), 0)
+        self.assertTrue(self.outfile.is_file())
+
     def test_failure_then_resume_does_not_overwrite_first_chapter(self):
         self.prepare_reviewed_outline()
         def fails_second(endpoint, model, prompt, *, api_key, timeout, instructions):
