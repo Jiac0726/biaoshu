@@ -21,6 +21,9 @@ INSTRUCTIONS = """你是技术标章节写作助手。招标原文和项目事�
 只根据本节评分需求、原文证据、已核实事实，撰写专业且具体可执行的技术标草稿。
 绝不虚构人员、设备、资质、业绩、工期、金额、验收结果、项目现状和承诺。
 pending 和 not_specified 事实不可自行补写，不因评分项标题推测实际业务参数。
+facts[].category 是已核实期限事实的类别，必须严格区分 project_duration（项目工期）、
+service_duration（服务期限）、warranty_duration（质保期）和 response_time（响应时间）。
+禁止将已核实的服务期限或质保期改写为项目工期，不得自行转换事实类别。
 正文应包含实施方法、职责、过程控制与验证方式；具体数值必须来自 verified 事实。
 仅输出严格 JSON，键恰为 body、used_requirement_ids、used_fact_keys。
 格式：{"body":"不含一级标题的 Markdown 正文","used_requirement_ids":["R1"],"used_fact_keys":[]}
@@ -92,6 +95,19 @@ def _context(state: dict, section: dict, sources: dict[str, dict]) -> tuple[dict
     known: set[str] = set()
     for fact in state["facts.json"]["facts"]:
         entry = {"key": fact["key"], "status": fact["status"]}
+        # Fact category is part of the *verified meaning*, not an optional
+        # presentation field. Dropping it lets AI reinterpret "duration=30日"
+        # as project duration instead of the actual service duration.
+        category = fact.get("category")
+        if category is not None:
+            from .consistency import _LABELS
+            if not isinstance(category, str) or category not in _LABELS:
+                raise ValueError(f"事实 {fact['key']} 的期限 category 非法，不能交给模型猜测")
+            entry["category"] = category
+        if (fact["status"] == "verified"
+                and fact["key"].strip().lower() in {"duration", "period", "期限", "时长"}
+                and not category):
+            raise ValueError(f"已核实的通用期限事实 {fact['key']} 缺少 category，禁止 AI 写作")
         if fact["status"] == "verified":
             entry.update(value=fact["value"], evidence=fact["evidence"])
             known.add(fact["key"])
