@@ -93,6 +93,7 @@ def discover_score_candidates(index_paths: list[Path], source_dir: Path) -> dict
         raise ValueError("至少提供一个 --index 证据索引")
     names: set[str] = set()
     proposals: list[dict] = []
+    multi_tier: list[dict] = []
     skipped = 0
     source_warnings: list[str] = []
     for p in index_paths:
@@ -118,8 +119,22 @@ def discover_score_candidates(index_paths: list[Path], source_dir: Path) -> dict
                     context = False
                 parsed = _candidate_parts(line, context)
                 if not parsed:
-                    if _SCORE.search(line):
+                    matches = list(_SCORE.finditer(line))
+                    if matches:
                         skipped += 1
+                        # Multi-tier grades, increments and penalties are not
+                        # one guaranteed score. Preserve the exact original
+                        # location for review, without creating an importable
+                        # numeric requirement that would invent a single value.
+                        if (len(matches) > 1 and not _EXCLUDED.search(line)
+                                and (_TECH.search(line) or context)):
+                            multi_tier.append({
+                                "id": f"M{len(multi_tier) + 1}",
+                                "score_options": [float(m.group("score")) for m in matches],
+                                "evidence": {"file": name, "location": location, "quote": line},
+                                "reason": "multiple_scoring_tiers",
+                                "status": "requires_manual_scoring_review",
+                            })
                     continue
                 title, score = parsed
                 proposals.append({
@@ -134,10 +149,12 @@ def discover_score_candidates(index_paths: list[Path], source_dir: Path) -> dict
         "status": "suggestions_only",
         "source_count": len(names),
         "candidates": proposals,
+        "ambiguous_candidates": multi_tier,
         "warnings": [
             "规则匹配仅提出候选，可能漏检合并单元格、无分值要求或多段评分规则；不能直接导入 requirements.json。",
             "必须由 Agent 比对原文，剔除商务/资格/价格评分项，再确认标题、分值和响应章节。",
             *source_warnings,
         ],
-        "statistics": {"suggested": len(proposals), "ambiguous_scoring_lines": skipped},
+        "statistics": {"suggested": len(proposals), "ambiguous_scoring_lines": skipped,
+                       "multi_tier_lines": len(multi_tier)},
     }
