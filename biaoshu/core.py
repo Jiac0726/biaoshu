@@ -109,6 +109,10 @@ def inspect(root: Path, strict: bool = False) -> dict:
                 errors.append(f"{sid} 正文文件不存在：sections/{sid}.md")
             else:
                 body = p.read_text(encoding="utf-8")
+                # The pending banner is part of the draft itself. A missing/deleted
+                # sidecar checkpoint must never silently promote a draft.
+                if "> AI生成草稿（待人工审查）" in body:
+                    errors.append(f"{sid} AI 草稿含待审核标记，不能正式审核或导出")
                 # A model-written draft cannot silently pass strict audit or official export.
                 checkpoint = root / "reports" / "section-writing" / (sid + ".json")
                 if checkpoint.exists():
