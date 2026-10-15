@@ -312,12 +312,24 @@ def main(argv=None):
                 print(f"警告：正式需求及目录已提交成功，但导入报告未保存至 {args.output}："
                       f"{report_error}。请检查项目、备份目录和现有报告；不要直接重复导入。",
                       file=sys.stderr)
-            print(f"{'已登记' if plan['status'] == 'applied' else '仅预览'}：新增 {plan['statistics']['new_requirements']} 条，"
+            labels = {
+                "applied": "已登记",
+                "already_registered": "已登记（无新增：均已登记）",
+                "no_changes": "审核操作完成（无新增）",
+                "blocked_hierarchical_outline": "预览阻断：现有层级目录无法自动追加",
+                "pending_review": "预览待人工审核",
+                "ready": "预览可申请登记" if not args.apply else "审核无新增",
+            }
+            print(f"{labels.get(plan['status'], plan['status'])}：新增 {plan['statistics']['new_requirements']} 条，"
                   f"多档待处理 {plan['statistics'].get('ambiguous_pending', 0)} 条，"
                   f"拒绝 {plan['statistics']['rejected']} 条，"
                   f"待审 {plan['statistics']['pending']} 条，"
                   f"重复 {plan['statistics']['duplicate']} 条。"
                   + (f"备份：{plan.get('backup_dir')}" if plan.get('backup_dir') else ""))
+            if plan["status"] == "blocked_hierarchical_outline":
+                for warning in plan["warnings"]:
+                    print(f"阻断原因：{warning}")
+                return 1
         elif args.command == "analyze-ai":
             result = analyze_tender(args.index, args.source_dir, model=args.model,
                                     endpoint=args.endpoint, allow_remote=args.allow_remote,
