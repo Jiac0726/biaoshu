@@ -14,7 +14,7 @@ from pathlib import Path
 from .core import ID_RE, inspect, load_project, read_json, write_json
 from .extraction import extract_document
 from .score_candidates import _source_index
-from .review_transaction import apply_transaction, exclusive
+from .review_transaction import apply_transaction, exclusive, journal_path
 
 ACKNOWLEDGEMENT = "我已逐项核对招标原文，并确认接受项可登记为技术响应需求"
 KINDS = {"technical_score", "mandatory_technical_requirement", "scoring_rule"}
@@ -232,6 +232,8 @@ def reviewed_import(project_dir: Path, suggestions_path: Path, review_path: Path
     """Serialize all applied imports; previews are always non-mutating."""
     if apply:
         with exclusive(Path(project_dir)):
+            if journal_path(Path(project_dir)).exists():
+                raise ValueError("存在未完成的事务，请先运行 review-recover --confirm")
             return _reviewed_import_impl(project_dir, suggestions_path, review_path,
                                          index_paths, source_dir, apply=True)
     return _reviewed_import_impl(project_dir, suggestions_path, review_path,
