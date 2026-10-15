@@ -190,6 +190,68 @@ class SectionWriterTests(unittest.TestCase):
                 "--acknowledgement", CONFIRM,
             ]), 0)
 
+    def test_partial_ai_write_keeps_journal_and_explicit_rollback(self):
+        from biaoshu.section_transaction import stage_path, recover
+        from biaoshu import review_transaction
+        scaffold(self.project)
+        doc = self.project / "sections" / "S1.md"
+        previous = doc.read_bytes()
+        original = review_transaction._atomic_bytes
+        def fail_section(dest, raw):
+            if dest == doc:
+                raise OSError("simulated second file interruption")
+            return original(dest, raw)
+        with patch.object(review_transaction, "_atomic_bytes", side_effect=fail_section):
+            with self.assertRaisesRegex(OSError, "simulated second file interruption"):
+                self.one()
+        self.assertTrue(stage_path(self.project, "S1").exists())
+        self.assertFalse(inspect(self.project)["ok"])
+        with self.assertRaisesRegex(ValueError, "section-recover"):
+            self.one()
+        with self.assertRaisesRegex(ValueError, "事务未完成"):
+            approve_section(self.project, "S1", acknowledgement=CONFIRM)
+        with self.assertRaisesRegex(ValueError, "确认"):
+            recover(self.project, "S1")
+        result = recover(self.project, "S1", confirm=True)
+        self.assertEqual(result["status"], "restored")
+        self.assertEqual(doc.read_bytes(), previous)
+        self.assertFalse(checkpoint_path(self.project, "S1").exists())
+        self.assertFalse(stage_path(self.project, "S1").exists())
+        self.assertTrue(inspect(self.project)["ok"])
+        self.assertEqual(self.one()["status"], "pending_review")
+
+    def test_recovery_refuses_to_overwrite_human_edits(self):
+        from biaoshu.section_transaction import stage_path, recover
+        from biaoshu import review_transaction
+        scaffold(self.project)
+        doc = self.project / "sections" / "S1.md"
+        with patch.object(review_transaction, "_atomic_bytes",
+                          side_effect=OSError("simulated write failure")):
+            with self.assertRaises(OSError):
+                self.one()
+        doc.write_text("人工更改过的独立实施方案", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "人工修改"):
+            recover(self.project, "S1", confirm=True)
+        self.assertEqual(doc.read_text(encoding="utf-8"), "人工更改过的独立实施方案")
+        self.assertTrue(stage_path(self.project, "S1").exists())
+
+    def test_recovery_of_stale_process_lock_requires_explicit_flag(self):
+        from biaoshu.section_transaction import stage_path, recover
+        from biaoshu import review_transaction
+        scaffold(self.project)
+        with patch.object(review_transaction, "_atomic_bytes",
+                          side_effect=OSError("simulated interrupted process")):
+            with self.assertRaises(OSError):
+                self.one()
+        lock = self.project / "reports" / "section-writing" / "S1.write.lock"
+        lock.write_text("stale\n", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "unlock-stale"):
+            recover(self.project, "S1", confirm=True)
+        result = recover(self.project, "S1", confirm=True, unlock_stale=True)
+        self.assertEqual(result["status"], "restored")
+        self.assertFalse(lock.exists())
+        self.assertFalse(stage_path(self.project, "S1").exists())
+
     def test_locked_outline_is_not_mutated_by_generation(self):
         proposal = self.root / "proposal.json"
         write_json(proposal, outline_template(self.project))
