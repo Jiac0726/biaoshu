@@ -123,7 +123,7 @@ def discover_score_candidates(index_paths: list[Path], source_dir: Path) -> dict
                         "id": f"M{len(multi_tier) + 1}",
                         "score_options": [float(m.group("score")) for m in _SCORE.finditer(text)],
                         "evidence": {"file": name, "location": location, "quote": text},
-                        "reason": "multiple_scoring_tiers",
+                        "reason": "adjustment_rule" if _ADJUSTMENT.search(text) else "multiple_scoring_tiers",
                         "status": "requires_manual_scoring_review",
                     })
                 skipped += 1
