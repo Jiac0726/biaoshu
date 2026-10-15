@@ -17,6 +17,7 @@ from .outline_tree import (outline_template, outline_plan, lock_outline,
 from .section_writer import write_sections, approve_section
 from .consistency import analyze_consistency
 from .response_trace import create_trace, audit_trace
+from .semantic_review import review_responses
 
 
 def extract_source(source: Path) -> str:
@@ -171,6 +172,18 @@ def main(argv=None):
     trace_audit = sub.add_parser("trace-audit", help="只读审查评分要求到正文原句的人工确认记录")
     trace_audit.add_argument("project_dir", type=Path)
     trace_audit.add_argument("--output", type=Path, help="保存本地 JSON 审查报告")
+    semantic = sub.add_parser("semantic-review", help="本地 AI 逐条审阅已定位技术响应并提出建议")
+    semantic.add_argument("project_dir", type=Path)
+    semantic.add_argument("--index", action="append", type=Path, required=True)
+    semantic.add_argument("--source-dir", type=Path, required=True)
+    semantic.add_argument("--model", required=True)
+    semantic.add_argument("--endpoint", default="http://127.0.0.1:11434/v1")
+    semantic.add_argument("--allow-remote", action="store_true",
+                          help="确认招标资料已获授权后才允许远程模型")
+    semantic.add_argument("--api-key-env")
+    semantic.add_argument("--timeout", type=float, default=90)
+    semantic.add_argument("--output", type=Path, required=True,
+                          help="只生成独立待复核建议 JSON，不修改项目或审批台账")
     args = parser.parse_args(argv)
     try:
         if args.command == "init":
@@ -183,6 +196,18 @@ def main(argv=None):
             index_path = args.output.with_suffix(".index.json")
             write_json(index_path, extracted.index)
             print(f"已提取：{args.output}；证据索引：{index_path}。请人工核对缺失文本和提取警告。")
+        elif args.command == "semantic-review":
+            if args.output.exists():
+                raise ValueError("AI 语义审稿报告已存在，禁止覆盖先前审稿记录")
+            result = review_responses(
+                args.project_dir, args.index, args.source_dir,
+                model=args.model, endpoint=args.endpoint,
+                allow_remote=args.allow_remote, api_key_env=args.api_key_env,
+                timeout=args.timeout)
+            write_json(args.output, result)
+            print(f"已生成 AI 逐项语义审稿建议 {result['statistics']['examined_links']} 项；"
+                  f"潜在问题 {result['statistics']['potential_issues']} 项；"
+                  f"结果 {args.output}。全部待人工复核，不影响正式批准。")
         elif args.command == "trace-init":
             result = create_trace(args.project_dir)
             print(f"已创建待人工填写的响应追溯台账：{result['path']}，"
