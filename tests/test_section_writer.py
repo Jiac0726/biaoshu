@@ -111,7 +111,7 @@ class SectionWriterTests(unittest.TestCase):
         data = read_json(self.index)
         data["blocks"][0]["text"] = "实施组织方案评分10分 外部伪造的信息"
         write_json(self.index, data)
-        with self.assertRaisesRegex(ValueError, "索引文本"):
+        with self.assertRaisesRegex(ValueError, "索引文本|index_content_mismatch"):
             self.one()
         self.assertFalse((self.project / "sections" / "S1.md").exists())
 

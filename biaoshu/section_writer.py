@@ -8,7 +8,7 @@ import re
 from pathlib import Path
 
 from .ai_tender_analysis import _request_model, _url, _normalized
-from .core import inspect, load_project, section_path, write_json
+from .core import inspect, load_project, section_path, write_json, review_context_sha256
 from .evidence import verify_evidence
 from .extraction import extract_document
 from .outline_tree import walk_outline
@@ -180,7 +180,8 @@ def write_section(root: Path, section_id: str, index_paths: list[Path], source_d
         body, used_facts = _body_from_model(generated, req_ids, fact_keys)
         if not inspect(root)["ok"] or load_project(root) != state:
             raise ValueError("写作过程中需求、目录或事实发生变化，请重新运行")
-        _validated_sources(index_paths, Path(source_dir).resolve())
+        if _validated_sources(index_paths, Path(source_dir).resolve()) != sources:
+            raise ValueError("模型生成期间招标原件或证据索引发生变化，拒绝使用旧来源写作")
         if _content_status(destination, section) == "existing":
             raise ValueError("生成期间正文被更改，拒绝覆盖人工内容")
         markdown = f"# {section['title']}\n\n{BANNER}\n\n{body}\n"
@@ -190,6 +191,11 @@ def write_section(root: Path, section_id: str, index_paths: list[Path], source_d
             "status": "pending_review", "body_sha256": _digest(markdown.encode("utf-8")),
             "model": model.strip(), "requirement_ids": sorted(req_ids),
             "used_fact_keys": used_facts,
+            "context_sha256": review_context_sha256(state),
+            "source_manifest": [
+                {"path": str((Path(source_dir).resolve() / name).resolve()), "sha256": idx["sha256"]}
+                for name, idx in sorted(sources.items())
+            ],
             "note": "AI 草稿必须经过人工逐项审核，不能视为正式投标内容",
         })
         if destination.exists():
@@ -225,6 +231,30 @@ def approve_section(root: Path, section_id: str, *, acknowledgement: str) -> dic
         raise ValueError("当前检查点不能审批")
     if meta["status"] == "pending_review" and _digest(current.encode("utf-8")) != meta.get("body_sha256"):
         raise ValueError("AI 草稿在审批前已被修改，必须重新核验写作结果")
+    state = load_project(root)
+    section = next((s for s in state["outline.json"]["sections"]
+                    if s["id"] == section_id), None)
+    if section is None:
+        raise ValueError("已审批章节不在当前目录中")
+    if sorted(section["requirement_ids"]) != meta.get("requirement_ids"):
+        raise ValueError("生成后章节关联需求已变更，必须重新核对并生成正文")
+    context_sha = review_context_sha256(state)
+    if meta.get("context_sha256") != context_sha and meta["status"] == "pending_review":
+        raise ValueError("生成后正式需求、事实或目录已经变动，禁止批准旧草稿")
+    manifest = meta.get("source_manifest")
+    if not isinstance(manifest, list) or not manifest:
+        raise ValueError("检查点缺少原文来源指纹，禁止批准未经来源绑定的草稿")
+    for item in manifest:
+        if not isinstance(item, dict) or not all(
+                isinstance(item.get(key), str) and item[key]
+                for key in ("path", "sha256")):
+            raise ValueError("招标原文指纹记录不完整")
+        try:
+            actual = _digest(Path(item["path"]).read_bytes())
+        except OSError as exc:
+            raise ValueError("章节原文已丢失或无法读取，禁止批准") from exc
+        if actual != item["sha256"]:
+            raise ValueError("章节使用的原始招标文件已发生变化，必须重新核实")
     if BANNER in current:
         current = current.replace(BANNER + "\n\n", "", 1)
     if len(current.strip()) < 50 or "TODO" in current.upper() or "待撰写" in current:
@@ -232,6 +262,7 @@ def approve_section(root: Path, section_id: str, *, acknowledgement: str) -> dic
     if current != dest.read_text(encoding="utf-8"):
         dest.write_text(current, encoding="utf-8")
     meta["status"] = "approved"
+    meta["context_sha256"] = context_sha
     meta["body_sha256"] = _digest(dest.read_bytes())
     meta["note"] = "操作者已声明审查此章节；不等于招标合规终审"
     write_json(checkpoint, meta)

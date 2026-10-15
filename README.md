@@ -225,3 +225,18 @@ python -m biaoshu semantic-review ./workspaces/my-bid --index ./workspaces/my-bi
 审稿结果是 `suggestions_only`，按每个 `requirement_id + section_id + section_line` 列出 `adequate/partial/missing/uncertain`、风险级别、原因、修订建议、真实原文和正文引文，并逐一标记 `pending_human_review`。模块在调用前验证原件 SHA-256、重新解析索引并检查已确认响应台账；验证生成的双侧引文确实来自提供给模型的原句，调用后再次检查台账、正文和招标原件未变化。**不会自动批准、重写或覆盖任何项目正文；已有报告禁止覆盖。**
 
 该能力是逐项**局部段落**语义建议，不会独立检查全文评分完整性、综合档次和合规性；即使模型判定 adequate，也绝不意味着该评分项已通过专业审核。
+
+
+## PR #1—#10 集成准备审查
+
+在合并到 main 之前，请先阅读 [集成准备与高风险阻断清单](docs/integration-readiness-20261015.md)。已确认旧 PR 虽 CI 通过、无 Git 冲突，仍有 P1/P2 自动审查问题；当前加固分支解决来源索引伪造、本地模型环境代理、未批准草稿和部分合同期限边界问题。**尚未获得独立 Approved 审查，不应直接用于生产或正式投标。**
+
+## 审核登记中断恢复（集成加固）
+
+`review-import --apply` 现在会在同一工作区中使用独占锁、原始文件备份和持久化事务标记保护 `requirements.json` / `outline.json`。两文件不能在通用文件系统上整体原子替换，因此若更新过程中进程崩溃，`check`、严格审计与正式导出将阻断，直到恢复完成。仅普通协作导入遵守此锁，外部编辑工具仍应避免同时改动文件。
+
+```bash
+python -m biaoshu review-recover ./workspaces/my-bid --confirm
+```
+
+恢复命令仅当现存两个文件均与日志中的更新前/更新后指纹一致、且备份可核验时，才回退至事务开始前状态；检测到人工或其它程序修改即拒绝覆盖，保留日志供手工处理。恢复后的旧审核决策可重新预览，但已留下的历史备份不会自动删除，以防冲销审计证据。此机制用于中断后的可检测与恢复，并不保证两文件在任意外部进程读取时瞬间一致。

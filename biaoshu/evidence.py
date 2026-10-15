@@ -10,6 +10,8 @@ import re
 import unicodedata
 from pathlib import Path
 
+from .extraction import extract_document
+
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -90,6 +92,18 @@ def verify_evidence(project_dir: Path, index_paths: list[Path], source_dir: Path
         if current_digest != digest:
             error("source_changed", name, "原始文件 SHA-256 与提取时不同，必须重新提取和核对")
             continue
+        # A correct SHA-256 does not authenticate editable index block text.
+        # Re-extract source bytes and bind every location/text pair to the source.
+        try:
+            extracted = extract_document(source).index
+        except (OSError, ValueError, RuntimeError) as exc:
+            error("source_extract_failed", name, f"原件无法重新解析：{exc}")
+            continue
+        actual_blocks = [(b["location"], b["text"]) for b in extracted["blocks"]]
+        recorded_blocks = [(b["location"], b["text"]) for b in blocks]
+        if extracted["sha256"] != digest or recorded_blocks != actual_blocks:
+            error("index_content_mismatch", name, "索引位置和文本与真实原件重新解析结果不一致")
+            continue
         sources[name] = index
         summary["indexes"] += 1
         for warning in index.get("warnings", []) if isinstance(index.get("warnings"), list) else []:
@@ -134,7 +148,15 @@ def verify_evidence(project_dir: Path, index_paths: list[Path], source_dir: Path
             error("location_not_found", subject, f"{name} 中不存在定位 {location}")
             continue
         normalized_quote = _normalized(quote)
-        if not normalized_quote or not any(normalized_quote in _normalized(block["text"]) for block in blocks):
+        def quote_in_source(block):
+            text = block["text"]
+            if block.get("kind") == "table_row":
+                # Column labels ("列1：" etc.) are synthesized metadata, not source
+                # text. Only actual cell values can support a quoted requirement.
+                pieces = re.split(r"(?:^|\s\|\s)列\d+：", text)
+                return any(normalized_quote in _normalized(cell) for cell in pieces[1:])
+            return normalized_quote in _normalized(text)
+        if not normalized_quote or not any(quote_in_source(block) for block in blocks):
             error("quote_mismatch", subject, f"引文与 {name} / {location} 的原文文本不匹配")
             continue
         summary["matched"] += 1

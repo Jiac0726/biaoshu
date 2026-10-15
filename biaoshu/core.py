@@ -29,6 +29,18 @@ def write_json(path: Path, value):
     temp.replace(path)
 
 
+def review_context_sha256(state: dict) -> str:
+    """Bind AI chapter approval to all currently registered tender rules and facts.
+
+    Deliberately omits transient reports and rendered sections, but includes
+    requirements/facts/outline, including the section-to-requirement mapping.
+    """
+    payload = {name: state[name] for name in ("requirements.json", "facts.json", "outline.json")}
+    raw = json.dumps(payload, sort_keys=True, ensure_ascii=False,
+                     separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
 def initialize(root: Path):
     root.mkdir(parents=True, exist_ok=True)
     for name, data in DEFAULTS.items():
@@ -58,6 +70,9 @@ def words(text: str) -> int:
 
 def inspect(root: Path, strict: bool = False) -> dict:
     errors, warnings, observations = [], [], []
+    from .review_transaction import journal_path
+    if journal_path(root).exists():
+        errors.append("检测到审核导入未完成的事务，禁止审核或导出；请执行 review-recover --confirm")
     try:
         data = load_project(root)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
@@ -109,6 +124,10 @@ def inspect(root: Path, strict: bool = False) -> dict:
                 errors.append(f"{sid} 正文文件不存在：sections/{sid}.md")
             else:
                 body = p.read_text(encoding="utf-8")
+                # The pending banner is part of the draft itself. A missing/deleted
+                # sidecar checkpoint must never silently promote a draft.
+                if "> AI生成草稿（待人工审查）" in body:
+                    errors.append(f"{sid} AI 草稿含待审核标记，不能正式审核或导出")
                 # A model-written draft cannot silently pass strict audit or official export.
                 checkpoint = root / "reports" / "section-writing" / (sid + ".json")
                 if checkpoint.exists():
@@ -119,6 +138,25 @@ def inspect(root: Path, strict: bool = False) -> dict:
                             errors.append(f"{sid} AI 章节尚未经人工确认")
                         elif meta.get("body_sha256") != hashlib.sha256(p.read_bytes()).hexdigest():
                             errors.append(f"{sid} 审核后正文已更改，需要重新人工确认")
+                        elif meta.get("context_sha256") != review_context_sha256(data):
+                            errors.append(f"{sid} 审核后需求、事实或目录发生变化，需要重新审核")
+                        elif not isinstance(meta.get("source_manifest"), list) or not meta["source_manifest"]:
+                            errors.append(f"{sid} 缺少可核验的原招标来源快照，需要重新审核")
+                        else:
+                            for source in meta["source_manifest"]:
+                                if not isinstance(source, dict) or not all(
+                                        isinstance(source.get(k), str) and source[k]
+                                        for k in ("path", "sha256")):
+                                    errors.append(f"{sid} 原文件快照信息不完整")
+                                    break
+                                try:
+                                    actual = hashlib.sha256(Path(source["path"]).read_bytes()).hexdigest()
+                                except OSError:
+                                    errors.append(f"{sid} 审核时使用的招标原件不可读取")
+                                    break
+                                if actual != source["sha256"]:
+                                    errors.append(f"{sid} 审核后招标原件发生变化，需要重新审核")
+                                    break
                     except (OSError, ValueError, TypeError):
                         errors.append(f"{sid} 写作检查点无法读取")
                 actual = words(body)

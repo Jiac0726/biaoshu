@@ -14,6 +14,7 @@ from pathlib import Path
 from .core import ID_RE, inspect, load_project, read_json, write_json
 from .extraction import extract_document
 from .score_candidates import _source_index
+from .review_transaction import apply_transaction, exclusive, journal_path
 
 ACKNOWLEDGEMENT = "我已逐项核对招标原文，并确认接受项可登记为技术响应需求"
 KINDS = {"technical_score", "mandatory_technical_requirement", "scoring_rule"}
@@ -134,7 +135,7 @@ def _normalize(text: str) -> str:
     return "".join(unicodedata.normalize("NFKC", text).split())
 
 
-def reviewed_import(project_dir: Path, suggestions_path: Path, review_path: Path,
+def _reviewed_import_impl(project_dir: Path, suggestions_path: Path, review_path: Path,
                     index_paths: list[Path], source_dir: Path, *, apply: bool = False) -> dict:
     """Plan or apply a non-destructive 1:1 requirement/outline import.
 
@@ -208,26 +209,32 @@ def reviewed_import(project_dir: Path, suggestions_path: Path, review_path: Path
 
     before_req = (project_dir / "requirements.json").read_bytes()
     before_sec = (project_dir / "outline.json").read_bytes()
-    req_after = {"requirements": [*reqs, *additions]}
-    sec_after = {"sections": [*sections, *new_sections]}
-    # All validation and preview occur before modifying either file.
-    # Keep local backups for independent recovery if interrupted mid-write.
-    # A later review may accept previously rejected items in the same suggestion set.
-    # Include the review snapshot so backups remain distinct for each decision set.
+    req_after = {**current["requirements.json"], "requirements": [*reqs, *additions]}
+    sec_after = {**current["outline.json"], "sections": [*sections, *new_sections]}
     review_stamp = _digest(review_path)
     backup = project_dir / "reports" / "review-backups" / (_digest(suggestions_path) + "-" + review_stamp)
-    if backup.exists():
-        raise ValueError("该候选文件的审核备份已经存在；请人工检查重复导入或恢复记录")
-    backup.mkdir(parents=True, exist_ok=False)
-    (backup / "requirements.before.json").write_bytes(before_req)
-    (backup / "outline.before.json").write_bytes(before_sec)
-    try:
-        write_json(project_dir / "requirements.json", req_after)
-        write_json(project_dir / "outline.json", sec_after)
-    except OSError:
-        (project_dir / "requirements.json").write_bytes(before_req)
-        (project_dir / "outline.json").write_bytes(before_sec)
-        raise
+    serialized = {
+        "requirements.json": (json.dumps(req_after, ensure_ascii=False, indent=2) + "\n").encode("utf-8"),
+        "outline.json": (json.dumps(sec_after, ensure_ascii=False, indent=2) + "\n").encode("utf-8"),
+    }
+    apply_transaction(
+        project_dir,
+        before={"requirements.json": before_req, "outline.json": before_sec},
+        after=serialized, backup=backup)
+
     plan["status"] = "applied"
     plan["backup_dir"] = str(backup)
     return plan
+
+
+def reviewed_import(project_dir: Path, suggestions_path: Path, review_path: Path,
+                    index_paths: list[Path], source_dir: Path, *, apply: bool = False) -> dict:
+    """Serialize all applied imports; previews are always non-mutating."""
+    if apply:
+        with exclusive(Path(project_dir)):
+            if journal_path(Path(project_dir)).exists():
+                raise ValueError("存在未完成的事务，请先运行 review-recover --confirm")
+            return _reviewed_import_impl(project_dir, suggestions_path, review_path,
+                                         index_paths, source_dir, apply=True)
+    return _reviewed_import_impl(project_dir, suggestions_path, review_path,
+                                 index_paths, source_dir, apply=False)

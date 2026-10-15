@@ -4,6 +4,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 from biaoshu.score_candidates import discover_score_candidates
 
 
@@ -33,6 +34,13 @@ class ScoreCandidatesTests(unittest.TestCase):
     def run_discovery(self):
         return discover_score_candidates([self.index], self.src)
 
+    def parser_only(self):
+        # Synthetic PDF/table formats here test parsing, not provenance.
+        # Production source verification remains enabled for end-to-end calls.
+        with patch("biaoshu.score_candidates._source_index",
+                   return_value=json.loads(self.index.read_text(encoding="utf-8"))):
+            return self.run_discovery()
+
     def test_only_technical_candidates_with_original_quote(self):
         result = self.run_discovery()
         self.assertEqual(result["status"], "suggestions_only")
@@ -47,6 +55,12 @@ class ScoreCandidatesTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "已变化"):
             self.run_discovery()
 
+    def test_forged_scoring_block_with_correct_source_hash_is_rejected(self):
+        self.blocks[1]["text"] = "模型伪造的评分表条目：100分"
+        self.save_index()
+        with self.assertRaisesRegex(ValueError, "索引与招标原件解析结果不一致"):
+            self.run_discovery()
+
     def test_duplicate_indexes_are_rejected(self):
         with self.assertRaisesRegex(ValueError, "同名原件"):
             discover_score_candidates([self.index, self.index], self.src)
@@ -55,7 +69,7 @@ class ScoreCandidatesTests(unittest.TestCase):
         self.blocks = [{"location": "第2表第4行", "kind": "table_row",
                         "text": "列1：实施组织方案 | 列2：10分 | 列3：评审实施方案内容"}]
         self.save_index()
-        result = self.run_discovery()
+        result = self.parser_only()
         self.assertEqual(len(result["candidates"]), 1)
         self.assertEqual(result["candidates"][0]["title"], "实施组织方案")
         self.assertEqual(result["candidates"][0]["evidence"]["location"], "第2表第4行")
@@ -64,7 +78,7 @@ class ScoreCandidatesTests(unittest.TestCase):
         self.blocks = [{"location": "第3页", "kind": "page",
                         "text": "质量保障措施：合格得5分，优秀得10分"}]
         self.save_index()
-        result = self.run_discovery()
+        result = self.parser_only()
         self.assertFalse(result["candidates"])
         self.assertEqual(result["statistics"]["ambiguous_scoring_lines"], 1)
 
@@ -72,7 +86,7 @@ class ScoreCandidatesTests(unittest.TestCase):
         self.blocks = [{"location": "第7页", "kind": "page",
                         "text": "技术评分\n实施组织方案：10分\n质量保障措施：15分"}]
         self.save_index()
-        result = self.run_discovery()
+        result = self.parser_only()
         self.assertEqual(len(result["candidates"]), 2)
         self.assertEqual({c["evidence"]["location"] for c in result["candidates"]}, {"第7页"})
 
@@ -86,7 +100,7 @@ class ScoreCandidatesTests(unittest.TestCase):
     def test_no_candidates_does_not_mean_compliant(self):
         self.blocks = [{"location": "第1行", "kind": "line", "text": "投标截止日期"}]
         self.save_index()
-        result = self.run_discovery()
+        result = self.parser_only()
         self.assertEqual(result["candidates"], [])
         self.assertIn("可能漏检", result["warnings"][0])
 
