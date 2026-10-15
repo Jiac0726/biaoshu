@@ -143,12 +143,13 @@ class ModelCompletionAndSafeOutputTests(unittest.TestCase):
     def test_analyze_ai_refuses_to_overwrite_project_requirements(self):
         original = (self.project / "requirements.json").read_bytes()
         with patch("biaoshu.cli.analyze_tender", return_value={
-                "candidates": [], "statistics": {"selected_blocks": 1}}):
+                "candidates": [], "statistics": {"selected_blocks": 1}}) as model:
             result = self.cli([
                 "analyze-ai", "--index", str(self.root / "fake.index.json"),
                 "--source-dir", str(self.sources), "--model", "local-fake",
                 "--output", str(self.project / "requirements.json"),
             ])
+            model.assert_not_called()
         self.assertNotEqual(result, 0)
         self.assertEqual((self.project / "requirements.json").read_bytes(), original)
 
@@ -168,13 +169,14 @@ class ModelCompletionAndSafeOutputTests(unittest.TestCase):
         path = self.project / "reports" / "response-trace.json"
         path.write_text("existing human approvals", encoding="utf-8")
         with patch("biaoshu.cli.review_responses", return_value={
-                "statistics": {"examined_links": 1, "potential_issues": 0}}):
+                "statistics": {"examined_links": 1, "potential_issues": 0}}) as model:
             result = self.cli([
                 "semantic-review", str(self.project),
                 "--index", str(self.root / "fake.index.json"),
                 "--source-dir", str(self.sources), "--model", "local-fake",
                 "--output", str(path),
             ])
+            model.assert_not_called()
         self.assertNotEqual(result, 0)
         self.assertEqual(path.read_text(encoding="utf-8"),
                          "existing human approvals")
