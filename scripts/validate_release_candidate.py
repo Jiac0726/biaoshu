@@ -26,6 +26,25 @@ def execute(args: list[str], *, cwd: Path) -> dict:
                 "elapsed_seconds": round(time.monotonic() - started, 2)}
 
 
+def revision(root: Path) -> dict:
+    """Pin evidence to the actually tested checkout, not a documentation SHA."""
+    try:
+        head = subprocess.run(
+            ["git", "rev-parse", "--verify", "HEAD"], cwd=root,
+            capture_output=True, text=True, check=False, timeout=8)
+        dirty = subprocess.run(
+            ["git", "status", "--porcelain", "--untracked-files=no"], cwd=root,
+            capture_output=True, text=True, check=False, timeout=8)
+    except (OSError, subprocess.TimeoutExpired):
+        return {"sha": None, "tracked_tree_clean": None, "status": "unverified"}
+    sha = head.stdout.strip()
+    if head.returncode or dirty.returncode or len(sha) != 40 or any(
+            ch not in "0123456789abcdefABCDEF" for ch in sha):
+        return {"sha": None, "tracked_tree_clean": None, "status": "unverified"}
+    return {"sha": sha, "tracked_tree_clean": not bool(dirty.stdout.strip()),
+            "status": "verified"}
+
+
 def run(*, report_path: Path | None = None) -> int:
     root = Path(__file__).resolve().parents[1]
     checks = [
@@ -45,6 +64,7 @@ def run(*, report_path: Path | None = None) -> int:
         "status": "passed" if len(outcomes) == len(checks) and all(
             x["status"] == "passed" for x in outcomes) else "failed",
         "results": outcomes,
+        "revision": revision(root),
         "limitations": [
             "仅验证虚构招标样本和模拟 AI，非真实模型质量验收",
             "不能替代独立人工代码审查、真实投标合规审查或主分支保护",
@@ -53,11 +73,13 @@ def run(*, report_path: Path | None = None) -> int:
     }
     if report_path is not None:
         target = Path(report_path)
-        if target.exists():
-            raise ValueError("验收报告已存在；为保留审查记录，不允许覆盖")
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n",
-                          encoding="utf-8")
+        try:
+            # Exclusive open is atomic even if two independent runners race.
+            with target.open("x", encoding="utf-8") as output:
+                output.write(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
+        except FileExistsError as exc:
+            raise ValueError("验收报告已存在；为保留审查记录，不允许覆盖") from exc
         print(f"本地验收记录已保存：{target}")
     print(f"集成候选验收：{report['status']}，通过 {sum(x['status'] == 'passed' for x in outcomes)}/{len(checks)} 个命令")
     return 0 if report["status"] == "passed" else 1
