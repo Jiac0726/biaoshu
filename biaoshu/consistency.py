@@ -159,7 +159,7 @@ def analyze_consistency(root: Path, state: dict | None = None) -> dict:
                        "errors": len(errors), "warnings": len(findings) - len(errors)},
         "limitations": [
             "仅识别工期、服务期限、质保期、响应时间中的明确数值等式，不分析全文所有承诺",
-            "仅在同一单位间比较数值；上下限、条件、引用原文、单位换算和专业语义必须人工判断",
+            "不同单位的数值不自动比较或换算；上下限、条件、引用原文和专业语义必须人工判断",
             "无冲突仅表示未发现上述模式的不一致，不证明内容准确、评分覆盖完整或投标合规",
         ],
     }
