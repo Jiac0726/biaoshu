@@ -419,6 +419,50 @@ class SectionWriterTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "不合法的小节 ID"):
             recover(self.project, "../outside", confirm=True, unlock_stale=True)
 
+    def test_manual_takeover_cli_requires_explicit_operator_confirmation(self):
+        def fail(*args, **kwargs):
+            raise RuntimeError("synthetic service failure")
+        with self.assertRaises(RuntimeError):
+            write_section(self.project, "S1", [self.index], self.source_dir,
+                          model="local-demo", transport=fail)
+        doc = self.project / "sections" / "S1.md"
+        doc.write_text("# 实施组织\n\n人工团队制定任务清单，落实质量检查、全过程日志与复核机制，每个工作阶段进行人工确认。\n",
+                       encoding="utf-8")
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(main(["section-manual", str(self.project),
+                                   "--section", "S1"]), 2)
+        self.assertTrue(checkpoint_path(self.project, "S1").exists())
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(main(["section-manual", str(self.project),
+                                   "--section", "S1", "--confirm"]), 0)
+        self.assertIn("人工接管", out.getvalue())
+        self.assertFalse(checkpoint_path(self.project, "S1").exists())
+        self.assertFalse(list((self.project / "reports" / "section-writing").glob("*.transaction.json")))
+
+    def test_approval_recovery_cli_restores_pending_review_not_autoapproves(self):
+        from biaoshu import review_transaction
+        from biaoshu.section_transaction import stage_path
+        self.one()
+        sidecar = checkpoint_path(self.project, "S1")
+        original = review_transaction._atomic_bytes
+        with patch.object(review_transaction, "_atomic_bytes",
+                          side_effect=lambda p, raw: (
+                              (_ for _ in ()).throw(OSError("checkpoint failed"))
+                              if p == sidecar else original(p, raw))):
+            with self.assertRaises(OSError):
+                approve_section(self.project, "S1", acknowledgement=CONFIRM)
+        self.assertTrue(stage_path(self.project, "S1").exists())
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(main(["section-recover", str(self.project),
+                                   "--section", "S1", "--confirm"]), 0)
+        self.assertIn("回退", out.getvalue())
+        self.assertEqual(read_json(sidecar)["status"], "pending_review")
+        self.assertIn(BANNER, (self.project / "sections" / "S1.md").read_text(encoding="utf-8"))
+        self.assertEqual(approve_section(self.project, "S1", acknowledgement=CONFIRM)["status"],
+                         "approved")
+
     def test_unapproved_reapproval_cannot_rebind_edited_approved_body(self):
         self.one()
         approve_section(self.project, "S1", acknowledgement=CONFIRM)
